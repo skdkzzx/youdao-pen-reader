@@ -1,6 +1,6 @@
-# 电子书阅读器 v6.1.0
+#电子书阅读器 v6.1.0
 
-[![许可证: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[许可证: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)(https://www.gnu.org/licenses/gpl-3.0)
 
 一款专为词典笔设计的小说阅读器插件，支持本地 `.txt` 小说阅读，并提供局域网网页上传功能，让你轻松在词典笔上看小说。
 
@@ -77,7 +77,7 @@ novel-reader/
 
 ## 安装方式
 
-### 方法一：通过 PenMods 插件目录安装
+通过 PenMods 插件目录安装
 
 将整个 `novel-reader` 文件夹复制到 PenMods 的插件目录下：
 
@@ -87,15 +87,6 @@ novel-reader/
 
 安装完成后，在插件管理中即可打开
 
-### 方式二：通过 youdaoExt 目录安装
-
-也可以放到扩展目录：
-
-```
-/userdisk/youdaoExt/ext/novel-reader/
-```
-
-安装完成后，在ai助手中输入应用名称即可打开
 
 ## 小说默认目录
 
