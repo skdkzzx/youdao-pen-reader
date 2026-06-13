@@ -76,7 +76,173 @@ novel-reader/
 - 词典笔和手机/电脑需连接至同一局域网 Wi-Fi
 
 ## 安装方式
+### 安装`python3` 和 `node`
 
+## 1. 前置准备
+
+### 1.1 PC 端
+
+- ADB 已安装并能连接设备
+- 网络可访问以下站点：
+  - `https://nodejs.org`（Node.js 官方下载）
+  - `https://github.com`（Python 预编译包）
+
+### 1.2 设备端
+#### 确认设备连接
+adb devices
+#### 输出示例:
+#### List of devices attached
+#### 2CA0000000000    device
+
+## 2. 下载预编译包
+
+### 2.1 Python 3 (python-build-standalone)
+
+> **来源**: [astral-sh/python-build-standalone](https://github.com/astral-sh/python-build-standalone)
+>
+
+前往 [Releases 页面](https://github.com/astral-sh/python-build-standalone/releases)，找到最新版本（如 `20260610`）。
+
+下载对应的 **aarch64 install_only** 包：
+
+| Python 版本 | 下载文件名 |
+|-------------|-----------|
+| **3.11** | `cpython-3.11.XX+YYYYMMDD-aarch64-unknown-linux-gnu-install_only.tar.gz` |
+
+
+> ⚠️ 务必选择 `install_only` 版本，体积更小；`aarch64-unknown-linux-gnu` 对应 glibc 版本。
+
+### 2.2 Node.js
+
+> **来源**: [nodejs.org](https://nodejs.org)
+>
+> **⚠️ 重要**：Node.js v18 起要求 **glibc ≥ 2.28**，而本设备只有 **glibc 2.27**。因此必须使用 **Node.js v16 LTS**！
+
+直接下载 Node.js v16.20.2 ARM64 版：
+
+```bash
+# 命令行下载 (Windows/Linux/macOS)
+curl -L -o node-v16.20.2-linux-arm64.tar.xz \
+  "https://nodejs.org/dist/v16.20.2/node-v16.20.2-linux-arm64.tar.xz"
+```
+
+或浏览器访问：https://nodejs.org/dist/v16.20.2/node-v16.20.2-linux-arm64.tar.xz
+
+### 2.3 确认文件
+
+下载完成后，两个文件名如下：
+
+```
+cpython-3.11.15+20260610-aarch64-unknown-linux-gnu-install_only.tar.gz  (~49 MB)
+node-v16.20.2-linux-arm64.tar.xz                                         (~22 MB)
+```
+
+---
+
+## 3. 推送到设备
+
+```bash
+# 推送 Python
+adb push cpython-3.11.15+20260610-aarch64-unknown-linux-gnu-install_only.tar.gz \
+  /userdisk/PenMods/plugins/novel-reader/
+
+# 推送 Node.js
+adb push node-v16.20.2-linux-arm64.tar.xz \
+  /userdisk/PenMods/plugins/novel-reader/
+
+# 确认文件已推送
+adb shell ls -la /userdisk/PenMods/plugins/novel-reader/*.tar.*
+```
+
+---
+
+## 4. 解压安装
+
+### 4.1 Python（tar.gz 格式）
+
+```bash
+adb shell
+
+# 进入目标目录
+cd /userdisk/PenMods/plugins/novel-reader
+
+# 解压 (BusyBox tar 支持 -z 即 gzip)
+tar -xzf cpython-*.tar.gz
+
+# 验证
+./python/bin/python3 --version
+# 输出: Python 3.11.15
+```
+
+### 4.2 Node.js（tar.xz 格式）
+
+BusyBox 的 tar 不支持 `-J`（xz），需要两步：
+
+```bash
+# 第一步: 先解 xz 压缩
+unxz node-v16.20.2-linux-arm64.tar.xz
+# 得到 node-v16.20.2-linux-arm64.tar
+
+# 第二步: 解 tar 包
+tar -xf node-v16.20.2-linux-arm64.tar
+
+# 验证
+./node-v16.20.2-linux-arm64/bin/node --version
+# 输出: v16.20.2
+```
+
+### 4.3 清理安装包
+
+```bash
+# 删除压缩包，释放空间
+rm -f cpython-*.tar.gz node-*.tar.xz node-*.tar
+```
+
+---
+
+## 5. 全局配置
+
+将 Python 和 Node.js 链接到系统 PATH 中：
+
+```bash
+# 创建软链接
+ln -sf /userdisk/PenMods/plugins/novel-reader/python/bin/python3 /usr/bin/python3
+ln -sf /userdisk/PenMods/plugins/novel-reader/python/bin/python3 /usr/bin/python
+ln -sf /userdisk/PenMods/plugins/novel-reader/node-v16.20.2-linux-arm64/bin/node   /usr/bin/node
+ln -sf /userdisk/PenMods/plugins/novel-reader/node-v16.20.2-linux-arm64/bin/npm    /usr/bin/npm
+
+# 退出 adb shell
+exit
+```
+
+
+
+---
+
+## 6. 验证安装
+
+```bash
+# 全局验证（从任意目录）
+adb shell python3 --version
+adb shell node --version
+adb shell npm --version
+
+# 预期输出:
+# Python 3.11.15
+# v16.20.2
+# 8.19.4
+```
+
+```bash
+# 验证 command -v 能找到
+adb shell "command -v python3 && command -v node && command -v npm"
+
+# 预期输出:
+# /usr/bin/python3
+# /usr/bin/node
+# /usr/bin/npm
+```
+### 安装插件
 通过 PenMods 插件目录安装
 
 将整个 `novel-reader` 文件夹复制到 PenMods 的插件目录下：
