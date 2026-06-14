@@ -1158,7 +1158,7 @@ Rectangle {
 
             Flickable {
                 width: parent.width
-                height: parent.height - 27
+                height: parent.height - 37
                 contentWidth: width
                 contentHeight: menuContent.height
                 clip: true
@@ -1392,6 +1392,9 @@ Rectangle {
                             onClicked: jumpToChapter(1)
                         }
                     }
+
+                    // 底部边距
+                    Item { width: parent.width; height: 10 }
                 }
             }
         }
@@ -1594,7 +1597,7 @@ Rectangle {
 
             ListView {
                 width: parent.width
-                height: parent.height - 32
+                height: parent.height - 43
                 clip: true
                 spacing: 4
                 model: bookmarkList
