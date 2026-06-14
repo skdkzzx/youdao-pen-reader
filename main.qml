@@ -408,6 +408,18 @@ Rectangle {
         var oldLine = currentLine;
         var oldTotalLines = lines.length;
 
+        // 先保存进度到内存和数据库，再清空状态
+        if (oldUrl !== "") {
+            progressStore[oldUrl] = {
+                file: oldUrl,
+                name: oldName || basename(oldUrl),
+                line: oldLine,
+                totalLines: oldTotalLines,
+                timestamp: new Date().getTime()
+            };
+            writeState("progress", JSON.stringify(progressStore));
+        }
+
         autoScroll = false;
         closePanels();
         homeMode = "shelf";
@@ -418,25 +430,49 @@ Rectangle {
         bookmarkList = [];
         currentLine = 0;
 
-        if (oldUrl === "") {
-            loadBookList();
-            return;
+        loadBookList();
+    }
+
+    function returnToHome() {
+        var oldUrl = currentUrl;
+        var oldName = fileName;
+        var oldLine = currentLine;
+        var oldTotalLines = lines.length;
+
+        // 保存当前阅读进度
+        if (oldUrl !== "") {
+            progressStore[oldUrl] = {
+                file: oldUrl,
+                name: oldName || basename(oldUrl),
+                line: oldLine,
+                totalLines: oldTotalLines,
+                timestamp: new Date().getTime()
+            };
+            writeState("progress", JSON.stringify(progressStore));
         }
 
-        progressStore[oldUrl] = {
-            file: oldUrl,
-            name: oldName || basename(oldUrl),
-            line: oldLine,
-            totalLines: oldTotalLines,
-            timestamp: new Date().getTime()
-        };
-        writeState("progress", JSON.stringify(progressStore));
+        autoScroll = false;
+        closePanels();
+        homeMode = "home";
+        currentUrl = "";
+        fileName = "";
+        lines = [];
+        chapterList = [];
+        bookmarkList = [];
+        currentLine = 0;
+
         loadBookList();
     }
 
     function loadFile(url) {
         if (!url)
             return;
+
+        // 先保存当前书籍的阅读进度，避免切换书籍时丢失
+        if (currentUrl !== "" && currentUrl !== url) {
+            saveProgress();
+        }
+
         if (xhr && xhr.readyState === XMLHttpRequest.LOADING) {
             xhr.abort();
             xhr = null;
@@ -986,11 +1022,19 @@ Rectangle {
             property real startX: 0
             property real startY: 0
             property bool moved: false
+            property bool longPressed: false
+            pressAndHoldInterval: 800
 
             onPressed: {
                 startX = mouseX;
                 startY = mouseY;
                 moved = false;
+                longPressed = false;
+            }
+
+            onPressAndHold: {
+                longPressed = true;
+                returnToHome();
             }
 
             onPositionChanged: {
@@ -999,6 +1043,8 @@ Rectangle {
             }
 
             onReleased: {
+                if (longPressed)
+                    return;
                 var dx = mouseX - startX;
                 var dy = mouseY - startY;
                 var dist = Math.sqrt(dx * dx + dy * dy);
