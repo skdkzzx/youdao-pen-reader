@@ -24,6 +24,7 @@ Rectangle {
         color: fg
         elide: Text.ElideRight
         horizontalAlignment: Text.AlignHCenter
+        font.family: "Microsoft YaHei"
     }
 
     MouseArea {

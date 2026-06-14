@@ -60,6 +60,7 @@ Rectangle {
 
     FontMetrics {
         id: readerFontMetrics
+        font.family: "Microsoft YaHei"
         font.pixelSize: baseFontSize
     }
 
@@ -569,7 +570,39 @@ Rectangle {
 
     function setTheme(name) {
         themeName = name;
-        var colors = ReaderUtils.getThemeColors(name);
+        var colors = {
+            "默认": {
+                bg: "#FFFBF0",
+                fg: "#333333"
+            },
+            "白色": {
+                bg: "#FFFFFF",
+                fg: "#333333"
+            },
+            "黄色": {
+                bg: "#FFF8E1",
+                fg: "#5D4037"
+            },
+            "绿色": {
+                bg: "#E8F5E9",
+                fg: "#2E7D32"
+            },
+            "黑色": {
+                bg: "#263238",
+                fg: "#ECEFF1"
+            },
+            "粉色": {
+                bg: "#FCE4EC",
+                fg: "#880E4F"
+            },
+            "蓝色": {
+                bg: "#E3F2FD",
+                fg: "#1565C0"
+            }
+        }[name] || {
+            bg: "#FFFBF0",
+            fg: "#333333"
+        };
         bgColor = colors.bg;
         textColor = colors.fg;
         saveSettings();
@@ -648,6 +681,7 @@ Rectangle {
                 font.bold: true
                 color: textColor
                 horizontalAlignment: Text.AlignHCenter
+                font.family: "Microsoft YaHei"
             }
 
             Text {
@@ -658,6 +692,7 @@ Rectangle {
                 opacity: uploaderAddress !== "" ? 1.0 : 0.65
                 elide: Text.ElideMiddle
                 horizontalAlignment: Text.AlignHCenter
+                font.family: "Microsoft YaHei"
             }
 
             Text {
@@ -667,6 +702,7 @@ Rectangle {
                 color: "#666666"
                 elide: Text.ElideRight
                 horizontalAlignment: Text.AlignHCenter
+                font.family: "Microsoft YaHei"
             }
 
             Row {
@@ -685,6 +721,7 @@ Rectangle {
                         text: uploaderStarted ? "取消上传" : "启动上传"
                         font.pixelSize: 11
                         color: uploaderStarted ? "#D32F2F" : "#1565C0"
+                        font.family: "Microsoft YaHei"
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -709,6 +746,7 @@ Rectangle {
                         text: "手动输入书名"
                         font.pixelSize: 11
                         color: "#fff"
+                        font.family: "Microsoft YaHei"
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -733,6 +771,7 @@ Rectangle {
                     font.pixelSize: 13
                     font.bold: true
                     color: "#333333"
+                    font.family: "Microsoft YaHei"
                 }
                 MouseArea {
                     anchors.fill: parent
@@ -756,6 +795,7 @@ Rectangle {
                         text: "☕ 赞赏作者"
                         font.pixelSize: 12
                         color: "#E65100"
+                        font.family: "Microsoft YaHei"
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -777,6 +817,7 @@ Rectangle {
                         text: "QQ群 1040494353"
                         font.pixelSize: 12
                         color: "#2E7D32"
+                        font.family: "Microsoft YaHei"
                     }
                 }
             }
@@ -806,6 +847,7 @@ Rectangle {
                             text: "返回"
                             font.pixelSize: 11
                             color: "#333333"
+                            font.family: "Microsoft YaHei"
                         }
                         MouseArea {
                             anchors.fill: parent
@@ -822,6 +864,7 @@ Rectangle {
                         color: textColor
                         verticalAlignment: Text.AlignVCenter
                         horizontalAlignment: Text.AlignHCenter
+                        font.family: "Microsoft YaHei"
                     }
 
                     Rectangle {
@@ -835,6 +878,7 @@ Rectangle {
                             text: "教程"
                             font.pixelSize: 11
                             color: "#1565C0"
+                            font.family: "Microsoft YaHei"
                         }
                         MouseArea {
                             anchors.fill: parent
@@ -883,12 +927,14 @@ Rectangle {
                                 color: "#333"
                                 elide: Text.ElideMiddle
                                 anchors.verticalCenter: parent.verticalCenter
+                                font.family: "Microsoft YaHei"
                             }
                             Text {
                                 text: modelData.progress + "%"
                                 font.pixelSize: 9
                                 color: "#888"
                                 anchors.verticalCenter: parent.verticalCenter
+                                font.family: "Microsoft YaHei"
                             }
                         }
                     }
@@ -901,6 +947,7 @@ Rectangle {
                         color: textColor
                         opacity: 0.5
                         horizontalAlignment: Text.AlignHCenter
+                        font.family: "Microsoft YaHei"
                     }
                 }
             }
@@ -923,6 +970,7 @@ Rectangle {
             anchors.topMargin: readerMargin
             anchors.bottomMargin: readerMargin
             text: getPageText()
+            font.family: "Microsoft YaHei"
             font.pixelSize: baseFontSize
             lineHeightMode: Text.FixedHeight
             lineHeight: getTextLineHeight()
@@ -1006,6 +1054,7 @@ Rectangle {
                     color: textColor
                     elide: Text.ElideMiddle
                     verticalAlignment: Text.AlignVCenter
+                    font.family: "Microsoft YaHei"
                 }
                 Rectangle {
                     width: 22
@@ -1017,6 +1066,7 @@ Rectangle {
                         text: "x"
                         font.pixelSize: 13
                         color: "#333"
+                        font.family: "Microsoft YaHei"
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -1043,6 +1093,7 @@ Rectangle {
                         text: "进度: " + getProgressPercent() + "% (" + getCurrentPage() + "/" + getTotalPages() + "页)"
                         font.pixelSize: 11
                         color: textColor
+                        font.family: "Microsoft YaHei"
                     }
 
                     Rectangle {
@@ -1089,6 +1140,7 @@ Rectangle {
                                     text: modelData.t
                                     font.pixelSize: 10
                                     color: baseFontSize === modelData.v ? "#fff" : "#333"
+                                    font.family: "Microsoft YaHei"
                                 }
                                 MouseArea {
                                     anchors.fill: parent
@@ -1125,6 +1177,7 @@ Rectangle {
                                     text: modelData.t
                                     font.pixelSize: 10
                                     color: lineSpacing === modelData.v ? "#fff" : "#333"
+                                    font.family: "Microsoft YaHei"
                                 }
                                 MouseArea {
                                     anchors.fill: parent
@@ -1183,6 +1236,7 @@ Rectangle {
                                     text: modelData.n.charAt(0)
                                     font.pixelSize: 9
                                     color: modelData.n === "黑色" ? "#ECEFF1" : "#333"
+                                    font.family: "Microsoft YaHei"
                                 }
                                 MouseArea {
                                     anchors.fill: parent
@@ -1285,6 +1339,7 @@ Rectangle {
                     font.pixelSize: 13
                     font.bold: true
                     color: textColor
+                    font.family: "Microsoft YaHei"
                 }
                 MenuButton {
                     label: "x"
@@ -1299,6 +1354,7 @@ Rectangle {
                 text: "第" + getCurrentPage() + "页 / 共" + getTotalPages() + "页 (" + getProgressPercent() + "%)"
                 font.pixelSize: 10
                 color: textColor
+                font.family: "Microsoft YaHei"
             }
 
             Row {
@@ -1362,6 +1418,7 @@ Rectangle {
                         color: "#333"
                         elide: Text.ElideRight
                         width: parent.width - 8
+                        font.family: "Microsoft YaHei"
                     }
                     MouseArea {
                         id: chapterMouse
@@ -1436,6 +1493,7 @@ Rectangle {
                     font.pixelSize: 13
                     font.bold: true
                     color: textColor
+                    font.family: "Microsoft YaHei"
                 }
                 MenuButton {
                     label: "x"
@@ -1487,6 +1545,7 @@ Rectangle {
                             text: "书签 " + (index + 1) + " - 第" + (Math.floor(modelData.line / getLinesPerPage()) + 1) + "页"
                             font.pixelSize: 11
                             color: "#333"
+                            font.family: "Microsoft YaHei"
                         }
                         Text {
                             width: parent.width
@@ -1494,6 +1553,7 @@ Rectangle {
                             font.pixelSize: 9
                             color: "#888"
                             elide: Text.ElideRight
+                            font.family: "Microsoft YaHei"
                         }
                     }
 
@@ -1512,6 +1572,7 @@ Rectangle {
                             text: "x"
                             font.pixelSize: 13
                             color: "#fff"
+                            font.family: "Microsoft YaHei"
                         }
                         MouseArea {
                             anchors.fill: parent
@@ -1529,6 +1590,7 @@ Rectangle {
                     color: textColor
                     opacity: 0.5
                     horizontalAlignment: Text.AlignHCenter
+                    font.family: "Microsoft YaHei"
                 }
             }
         }
@@ -1554,12 +1616,14 @@ Rectangle {
                 font.pixelSize: 14
                 font.bold: true
                 color: textColor
+                font.family: "Microsoft YaHei"
             }
             Text {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "间隔: " + autoScrollSeconds + " 秒/页"
                 font.pixelSize: 11
                 color: textColor
+                font.family: "Microsoft YaHei"
             }
 
             Row {
@@ -1629,6 +1693,7 @@ Rectangle {
             text: "加载中..."
             font.pixelSize: 11
             color: "#333"
+            font.family: "Microsoft YaHei"
         }
     }
 
@@ -1639,6 +1704,7 @@ Rectangle {
         font.pixelSize: 13
         color: "#D32F2F"
         z: 100
+        font.family: "Microsoft YaHei"
     }
 
     SponsorDialog {

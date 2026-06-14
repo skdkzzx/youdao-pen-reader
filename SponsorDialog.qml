@@ -44,6 +44,7 @@ Rectangle {
                     font.pixelSize: 13
                     font.bold: true
                     color: "#E65100"
+                    font.family: "Microsoft YaHei"
                 }
 
                 Text {
@@ -53,6 +54,7 @@ Rectangle {
                     color: "#666666"
                     wrapMode: Text.WordWrap
                     lineHeight: 1.4
+                    font.family: "Microsoft YaHei"
                 }
 
                 Rectangle {
@@ -66,6 +68,7 @@ Rectangle {
                         text: "关闭"
                         font.pixelSize: 10
                         color: "#999999"
+                        font.family: "Microsoft YaHei"
                     }
                     MouseArea {
                         anchors.fill: parent
@@ -97,6 +100,7 @@ Rectangle {
                     text: sponsorQrIndex === 0 ? "爱发电 · 点击切换微信" : "微信 · 点击切换爱发电"
                     font.pixelSize: 8
                     color: "#AAAAAA"
+                    font.family: "Microsoft YaHei"
                 }
             }
         }

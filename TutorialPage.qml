@@ -31,6 +31,7 @@ Rectangle {
                     text: "返回"
                     font.pixelSize: 11
                     color: "#333333"
+                    font.family: "Microsoft YaHei"
                 }
                 MouseArea {
                     anchors.fill: parent
@@ -47,6 +48,7 @@ Rectangle {
                 color: "#333333"
                 verticalAlignment: Text.AlignVCenter
                 horizontalAlignment: Text.AlignHCenter
+                font.family: "Microsoft YaHei"
             }
         }
 
@@ -66,6 +68,7 @@ Rectangle {
             lineHeight: 1.5
             wrapMode: Text.WordWrap
             clip: true
+            font.family: "Microsoft YaHei"
         }
     }
 
