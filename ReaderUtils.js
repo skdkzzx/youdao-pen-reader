@@ -80,6 +80,79 @@ function encodePath(url) {
     return "file://" + encoded;
 }
 
+// ====== 中英文视觉宽度处理 ======
+
+// 判断字符是否为宽字符（中文/日文/韩文/全角符号 ≈ 2个英文字母宽）
+function isWideChar(code) {
+    return (code >= 0x2E80 && code <= 0x9FFF)    || // CJK统一表意文字、部首等
+           (code >= 0xF900 && code <= 0xFAFF)    || // CJK兼容表意文字
+           (code >= 0xFF00 && code <= 0xFFEF)    || // 全角形式（包含全角字母）
+           (code >= 0x3000 && code <= 0x303F)    || // CJK符号和标点
+           (code >= 0xAC00 && code <= 0xD7AF)    || // 韩文
+           code === 0x200C || code === 0x200D;      // 零宽非连接符/零宽连接符
+}
+
+// 计算字符串的视觉宽度（中文=2，英文=1）
+function visualWidth(str) {
+    var w = 0;
+    for (var i = 0; i < str.length; i++) {
+        w += isWideChar(str.charCodeAt(i)) ? 2 : 1;
+    }
+    return w;
+}
+
+// 在字符串中按视觉宽度和单词边界找到合适的截断位置
+// 优先在空格/CJK字符后/中英文交界处断开，避免切断英文单词
+function findSplitPoint(str, maxWidth) {
+    var w = 0;
+    var lastBreak = -1;
+    var prevIsWide = false;
+
+    for (var i = 0; i < str.length; i++) {
+        var code = str.charCodeAt(i);
+        var curIsWide = isWideChar(code);
+        var cw = curIsWide ? 2 : 1;
+
+        // 如果加上这个字符会超出最大宽度
+        if (w + cw > maxWidth) {
+            // 有合适的断点则在那断开，否则硬切
+            if (lastBreak > 0) return lastBreak;
+            if (i > 0) return i;
+            return 1;
+        }
+
+        w += cw;
+
+        // 判断当前位置是否可断开（断点在该字符之后）
+        var isBreak = false;
+        if (code === 0x20 || code === 0x3000) {
+            // 空格：可以在空格之后断开
+            isBreak = true;
+        } else if (curIsWide) {
+            // CJK字符：每个CJK字符后都可以断开
+            isBreak = true;
+        } else if (i + 1 < str.length) {
+            var next = str.charCodeAt(i + 1);
+            var nextIsWide = isWideChar(next);
+            if (nextIsWide || next === 0x20 || next === 0x3000) {
+                // 英文单词结束（后面是空格或中文），可以断开
+                isBreak = true;
+            } else if (prevIsWide && !curIsWide) {
+                // 中文后接英文开头：也可以断开
+                isBreak = true;
+            }
+        } else {
+            // 最后一个字符
+            isBreak = true;
+        }
+
+        if (isBreak) lastBreak = i + 1;
+        prevIsWide = curIsWide;
+    }
+
+    return str.length;
+}
+
 function updateCharsPerLine(baseFontSize) {
     if (baseFontSize <= 13) return 22;
     else if (baseFontSize <= 15) return 19;
@@ -137,16 +210,21 @@ function getPageText(lines, currentLine, linesPerPage) {
     return page.join("\n");
 }
 
+// ====== 内容处理（视觉宽度感知 + 单词边界保护） ======
+// charsPerLine 表示每行可容纳的中文字符数，视觉宽度预算 = charsPerLine * 2
+
 function processContent(content, charsPerLine) {
+    var maxVisualWidth = charsPerLine * 2;
     var rawLines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
     var wrapped = [];
     var chapters = [];
-    var chapterRegex = /^(第[一二三四五六七八九十百千零\d]+[章节回集卷部篇]|Chapter\s+\d+|CHAPTER\s+\d+)/;
+    // 支持中文和英文章节标题
+    var chapterRegex = /^(第[一二三四五六七八九十百千零\d]+[章节回集卷部篇]|Chapter\s+\d+|CHAPTER\s+\d+|Part\s+\d+|PART\s+\d+)/;
 
     for (var i = 0; i < rawLines.length; i++) {
         var raw = rawLines[i];
         var title = raw.trim();
-        if (title.length > 0 && title.length < 50 && chapterRegex.test(title)) {
+        if (title.length > 0 && title.length < 60 && chapterRegex.test(title)) {
             chapters.push({ title: title, lineIndex: wrapped.length });
         }
 
@@ -154,9 +232,12 @@ function processContent(content, charsPerLine) {
             wrapped.push("");
         } else {
             var rest = raw;
-            while (rest.length > charsPerLine) {
-                wrapped.push(rest.substring(0, charsPerLine));
-                rest = rest.substring(charsPerLine);
+            while (visualWidth(rest) > maxVisualWidth) {
+                var splitIdx = findSplitPoint(rest, maxVisualWidth);
+                // 确保至少切一个字符，防止死循环
+                if (splitIdx <= 0) splitIdx = 1;
+                wrapped.push(rest.substring(0, splitIdx));
+                rest = rest.substring(splitIdx);
             }
             wrapped.push(rest);
         }
