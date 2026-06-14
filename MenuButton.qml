@@ -9,7 +9,7 @@ Rectangle {
     property color bg: "#DDDDDD"
     property color fg: "#333333"
 
-    signal clicked()
+    signal clicked
 
     width: w
     height: h
