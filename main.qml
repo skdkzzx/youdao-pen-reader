@@ -18,12 +18,15 @@ Rectangle {
     property var xhr: null
     property int currentRequestId: 0
 
-    property var lines: []
+    property var lines: []           // 当前章节的换行后文本
+    property var rawLines: []         // 原始文本行（全部）
+    property var chapterBoundaries: [] // [{title, startRaw, endRaw}]
+    property int currentChapterIdx: -1
     property int currentLine: 0
     property int charsPerLine: 35
     property var chapterList: []
 
-    property int baseFontSize: 14
+    property int baseFontSize: 15
     property int lineSpacing: 4
     property string bgColor: "#FFFBF0"
     property string textColor: "#333333"
@@ -101,7 +104,6 @@ Rectangle {
 
     property string activePanel: ""
     property bool keyboardPending: false
-    property real pendingProgressRatio: -1
     property var bookList: []
     property var bookmarkList: []
     property var progressStore: ({})
@@ -119,6 +121,19 @@ Rectangle {
     property bool showTutorial: false
     property int tutorialLine: 0
     property var tutorialLines: []
+    property bool _ipQueried: false
+    property int _uploadRetry: 0
+    // 章节加载相关（不再需要分块处理）
+
+    // ====== 滚动模式 ======
+    property bool scrollMode: false
+    property real scrollOffset: 0
+    property real scrollMax: 0
+
+    // ====== Toast ======
+    property string toastMessage: ""
+    property bool showNextChapter: false   // 是否显示"下一章"按钮
+
     readonly property string defaultBookFolder: "/userdisk/Music/"
     readonly property string defaultBookSuffix: ".txt"
     readonly property int readerMargin: 6
@@ -133,7 +148,7 @@ Rectangle {
         id: autoScrollTimer
         interval: Math.max(1, autoScrollSeconds) * 1000
         repeat: true
-        running: autoScroll && pageMode === "reader" && activePanel === ""
+        running: autoScroll && pageMode === "reader" && activePanel === "" && !scrollMode
         onTriggered: nextPage()
     }
 
@@ -266,11 +281,24 @@ Rectangle {
     }
 
     Component.onDestruction: {
-        if (currentUrl !== "") {
+        // 不依赖 currentUrl——returnToShelf 已清空，但 progressStore 内存中仍有正确数据
+        if (currentUrl !== "" && lines.length > 0) {
             Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length);
-            Storage.flushProgressStore(progressStore);
         }
+        // 始终刷一遍 progressStore——里面保存的是最后一次完整保存的进度
+        Storage.flushProgressStore(progressStore);
         saveSettings();
+    }
+
+    function _readLog(path) {
+        try {
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET", "file://" + path, false);
+            xhr.send();
+            if (xhr.status === 200 || xhr.status === 0)
+                return xhr.responseText || "";
+        } catch (e) {}
+        return "";
     }
 
     function startUploaderService() {
@@ -285,15 +313,17 @@ Rectangle {
         uploaderStarted = true;
         uploaderStatus = "上传服务启动中";
         uploaderAddress = "";
-        uploaderController.startShell();
-        uploaderController.sendCommand("sh /userdisk/PenMods/plugins/novel-reader/start-uploader.sh || sh /userdisk/youdaoExt/ext/novel-reader/start-uploader.sh || sh ./start-uploader.sh");
+        _ipQueried = false;
+        _uploadRetry = 0;
+        uploaderController.sendCommand("rm -f /tmp/novel-uploader.log 2>/dev/null; echo ''");
+        uploaderController.sendCommand("sh /userdisk/PenMods/plugins/novel-reader/start-uploader.sh >/tmp/novel-uploader.log 2>&1 &");
     }
 
     function stopUploaderService() {
         if (!uploaderStarted)
             return;
         if (uploaderController) {
-            uploaderController.sendCommand("kill $(lsof -t -i:8088) 2>/dev/null; pkill -f uploader.py; pkill -f uploader.js; echo '上传服务已停止'");
+            uploaderController.sendCommand("fuser -k 8088/tcp 2>/dev/null || kill $(fuser 8088/tcp 2>/dev/null) 2>/dev/null || pkill -f 'uploader\.py\|uploader\.js' 2>/dev/null; echo ''");
         }
         uploaderStarted = false;
         uploaderStatus = "上传服务已停止";
@@ -316,21 +346,48 @@ Rectangle {
     }
 
     function refreshUploaderOutput() {
-        if (!uploaderStarted)
+        if (!uploaderStarted || uploaderAddress !== "")
             return;
+
         uploaderController = (typeof shellPluginController !== "undefined") ? shellPluginController : null;
-        uploaderOutput = uploaderController ? uploaderController.outputText : "";
-        var addr = ReaderUtils.getUploaderUrl(uploaderOutput);
-        if (addr) {
-            uploaderAddress = addr;
-            uploaderStatus = "上传服务已启动";
-        } else if (uploaderStarted && uploaderOutput.indexOf("未找到 python3 或 node") >= 0) {
-            uploaderStatus = "缺少 python3/node";
-        } else if (uploaderStarted && uploaderOutput.indexOf("Address already in use") >= 0) {
-            uploaderStatus = "端口已占用";
+        if (!uploaderController)
+            return;
+
+        var log = _readLog("/tmp/novel-uploader.log");
+        if (log !== "") {
+            var url = ReaderUtils.getUploaderUrl(log);
+            if (url) {
+                uploaderAddress = url;
+                uploaderStatus = "上传服务已启动";
+                _uploadRetry = 0;
+                return;
+            }
+            var ips = log.match(/(\d+\.\d+\.\d+\.\d+)/g);
+            if (ips) {
+                for (var i = ips.length - 1; i >= 0; i--) {
+                    if (ips[i] !== "127.0.0.1" && ips[i].indexOf("169.254.") !== 0 && ips[i] !== "0.0.0.0") {
+                        uploaderAddress = "http://" + ips[i] + ":8088";
+                        uploaderStatus = "上传服务已启动";
+                        _uploadRetry = 0;
+                        return;
+                    }
+                }
+            }
+            if (log.indexOf("未找到 python3 或 node") >= 0) {
+                uploaderStatus = "缺少 python3/node";
+                return;
+            }
+            if (log.indexOf("Address already in use") >= 0 || log.indexOf("EADDRINUSE") >= 0) {
+                uploaderStatus = "端口 8088 被占用";
+                return;
+            }
+        }
+
+        _uploadRetry++;
+        if (_uploadRetry > 40) {
+            uploaderStatus = log === "" ? "上传服务未启动或日志为空" : "获取 IP 超时，请检查网络连接";
         }
     }
-
     function readState(key, fallbackValue) {
         return Storage.readState(key, fallbackValue);
     }
@@ -347,9 +404,26 @@ Rectangle {
         bookmarksStore = Storage.loadBookmarksStore();
     }
 
+    // 计算整本书进度（用于书架显示）
+    function calcBookPercent() {
+        if (!rawLines || rawLines.length === 0 || chapterBoundaries.length === 0) return 0;
+        var doneRaw = 0;
+        for (var i = 0; i < currentChapterIdx && i < chapterBoundaries.length; i++) {
+            doneRaw += chapterBoundaries[i].endRaw - chapterBoundaries[i].startRaw;
+        }
+        var chapTotal = 0, chapDone = 0;
+        if (currentChapterIdx >= 0 && currentChapterIdx < chapterBoundaries.length) {
+            var b = chapterBoundaries[currentChapterIdx];
+            chapTotal = b.endRaw - b.startRaw;
+            chapDone = chapTotal > 0 && lines.length > 0
+                ? Math.floor((currentLine / lines.length) * chapTotal) : 0;
+        }
+        return Math.min(100, Math.round((doneRaw + Math.min(chapDone, chapTotal)) / rawLines.length * 100));
+    }
+
     // 翻页时只更新内存，由防抖定时器批量写入文件
     function saveProgress() {
-        Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length);
+        Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent());
         flushDebounceTimer.restart();
     }
 
@@ -357,13 +431,15 @@ Rectangle {
     function flushProgress() {
         if (currentUrl === "")
             return;
-        Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length);
+        Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent());
         Storage.flushProgressStore(progressStore);
         flushDebounceTimer.stop();
     }
 
     function loadProgress(url) {
-        return Storage.loadProgressFromStore(progressStore, url);
+        var item = Storage.loadProgressFromStore(progressStore, url);
+        if (item && typeof item === "object") return item;
+        return null;
     }
 
     function saveSettings() {
@@ -374,19 +450,21 @@ Rectangle {
             textColor: textColor,
             themeName: themeName,
             lastFile: lastFilePath,
-            autoScrollSeconds: autoScrollSeconds
+            autoScrollSeconds: autoScrollSeconds,
+            scrollMode: scrollMode
         };
         Storage.saveSettingsToStore(settings);
     }
 
     function loadSettings() {
         var settings = Storage.loadSettingsFromStore();
-        baseFontSize = parseInt(settings.fontSize) || 14;
+        baseFontSize = parseInt(settings.fontSize) || 15;
         lineSpacing = parseInt(settings.lineSpacing) || 4;
         bgColor = settings.bgColor || "#FFFBF0";
         textColor = settings.textColor || "#333333";
         themeName = settings.themeName || "默认";
         lastFilePath = settings.lastFile || "";
+        scrollMode = settings.scrollMode === true;
         if (settings.autoScrollSeconds !== undefined) {
             autoScrollSeconds = ReaderUtils.normalizeAutoScrollSeconds(settings.autoScrollSeconds);
         } else if (settings.autoScrollSpeed !== undefined) {
@@ -446,14 +524,14 @@ Rectangle {
             file: currentUrl,
             name: fileName,
             line: currentLine,
+            chapterIdx: currentChapterIdx,
             percent: getProgressPercent(),
             preview: preview
         });
         bookmarksStore[currentUrl] = items;
         if (writeState("bookmarks", JSON.stringify(bookmarksStore))) {
             loadBookmarkList();
-            statusMessage = "已添加书签";
-            messageTimer.restart();
+            showToast("✓ 已添加书签");
         } else {
             statusMessage = "添加书签失败";
             messageTimer.restart();
@@ -549,6 +627,7 @@ Rectangle {
     }
 
     function getProgressPercent() {
+        // 菜单内显示章节进度
         return ReaderUtils.getProgressPercent(currentLine, lines.length);
     }
 
@@ -562,6 +641,45 @@ Rectangle {
 
     function getPageText() {
         return ReaderUtils.getPageText(lines, currentLine, getLinesPerPage());
+    }
+
+    function showToast(msg) {
+        toastMessage = msg;
+        toastTimer.restart();
+    }
+
+    function toggleScrollMode() {
+        if (!currentUrl || lines.length === 0)
+            return;
+        if (scrollMode) {
+            // 滚动 → 分页
+            var newLine = Math.floor(scrollFlickable.contentY / getTextLineHeight());
+            currentLine = Math.max(0, Math.min(newLine, maxStartLine()));
+            clampCurrentLine();
+            scrollMode = false;
+            flushProgress();
+        } else {
+            // 分页 → 滚动
+            scrollOffset = currentLine * getTextLineHeight();
+            scrollMode = true;
+            updateScrollMax();
+            scrollFlickable.contentY = Math.max(0, Math.min(scrollOffset, scrollMax));
+        }
+        saveSettings();
+        showToast(scrollMode ? "已切换为滚动模式" : "已切换为分页模式");
+    }
+
+    function updateScrollMax() {
+        if (lines.length > 0) {
+            var contentH = lines.length * getTextLineHeight();
+            var viewH = readerPage.height - readerMargin * 2;
+            scrollMax = Math.max(0, contentH - viewH);
+            if (scrollOffset > scrollMax)
+                scrollOffset = scrollMax;
+        } else {
+            scrollMax = 0;
+            scrollOffset = 0;
+        }
     }
 
     function closePanels() {
@@ -585,31 +703,22 @@ Rectangle {
             pendingLine = -1;
         }
 
-        var oldUrl = currentUrl;
-        var oldName = fileName;
-        var oldLine = currentLine;
-        var oldTotalLines = lines.length;
-
-        // 先保存进度到内存和数据库，再清空状态
-        if (oldUrl !== "") {
-            progressStore[oldUrl] = {
-                file: oldUrl,
-                name: oldName || basename(oldUrl),
-                line: oldLine,
-                totalLines: oldTotalLines,
-                timestamp: new Date().getTime()
-            };
-            writeState("progress", JSON.stringify(progressStore));
-        }
+        // 先保存当前进度到内存（progressStore → dataCache），再清空状态
+        if (currentUrl !== "")
+            flushProgress();
 
         autoScroll = false;
         closePanels();
         currentUrl = "";
         fileName = "";
         lines = [];
+        rawLines = [];
+        chapterBoundaries = [];
         chapterList = [];
         bookmarkList = [];
         currentLine = 0;
+        currentChapterIdx = -1;
+        showNextChapter = false;
 
         // 导航到书架
         navigateRoot();
@@ -628,31 +737,22 @@ Rectangle {
             pendingLine = -1;
         }
 
-        var oldUrl = currentUrl;
-        var oldName = fileName;
-        var oldLine = currentLine;
-        var oldTotalLines = lines.length;
-
-        // 保存当前阅读进度
-        if (oldUrl !== "") {
-            progressStore[oldUrl] = {
-                file: oldUrl,
-                name: oldName || basename(oldUrl),
-                line: oldLine,
-                totalLines: oldTotalLines,
-                timestamp: new Date().getTime()
-            };
-            writeState("progress", JSON.stringify(progressStore));
-        }
+        // 先保存当前进度到内存，再清空状态
+        if (currentUrl !== "")
+            flushProgress();
 
         autoScroll = false;
         closePanels();
         currentUrl = "";
         fileName = "";
         lines = [];
+        rawLines = [];
+        chapterBoundaries = [];
         chapterList = [];
         bookmarkList = [];
         currentLine = 0;
+        currentChapterIdx = -1;
+        showNextChapter = false;
 
         navigateRoot();
         loadBookList();
@@ -709,26 +809,17 @@ Rectangle {
                 return;
             if (xhr.readyState !== XMLHttpRequest.DONE)
                 return;
-            isLoading = false;
             if (xhr.status === 200 || xhr.status === 0) {
                 var content = xhr.responseText || "";
                 if (content.length > 0 && content.charCodeAt(0) === 0xFEFF)
                     content = content.substring(1);
+                // processContent 会将后续初始化移至 afterContentLoaded（同步小文件/异步大文件）
                 processContent(content);
-                if (pendingProgressRatio >= 0) {
-                    currentLine = Math.floor(pendingProgressRatio * lines.length);
-                    pendingProgressRatio = -1;
-                } else {
-                    currentLine = loadProgress(originalUrl);
-                }
-                clampCurrentLine();
-                loadBookmarkList();
-                saveSettings();
-                statusMessage = "";
             } else if (requestUrl !== originalUrl) {
                 doLoadFile(originalUrl, originalUrl);
                 return;
             } else {
+                isLoading = false;
                 lines = [];
                 chapterList = [];
                 currentLine = 0;
@@ -752,10 +843,90 @@ Rectangle {
         xhr.send();
     }
 
-    function processContent(content) {
-        var result = ReaderUtils.processContent(content, charsPerLine);
+    // ====== 章节边界扫描（纯文本扫描，不做换行处理，速度极快） ======
+    function scanChapterBoundaries(raw) {
+        var bounds = [];
+        var regex = /^(第[一二三四五六七八九十百千零\d]+[章节回集卷部篇]|Chapter\s+\d+|CHAPTER\s+\d+|Part\s+\d+|PART\s+\d+)/;
+        for (var i = 0; i < raw.length; i++) {
+            var t = raw[i].trim();
+            if (t.length > 0 && t.length < 60 && regex.test(t)) {
+                if (bounds.length > 0)
+                    bounds[bounds.length - 1].endRaw = i;
+                bounds.push({ title: t, startRaw: i, endRaw: raw.length });
+            }
+        }
+        // 无章节 → 整本书算一章
+        if (bounds.length === 0) {
+            bounds.push({ title: bookTitle(fileName), startRaw: 0, endRaw: raw.length });
+            return bounds;
+        }
+        // 第 0 章从文件开头开始（包含序言/前言等）
+        bounds[0].startRaw = 0;
+        for (var j = 0; j < bounds.length - 1; j++)
+            bounds[j].endRaw = bounds[j + 1].startRaw;
+        return bounds;
+    }
+
+    // 加载指定章节（仅换行该章节的原始行）
+    function loadChapter(idx) {
+        if (idx < 0 || idx >= chapterBoundaries.length) return;
+        if (currentChapterIdx === idx && lines.length > 0) return; // 已加载
+        isLoading = true;
+
+        var b = chapterBoundaries[idx];
+        var chapterRaw = rawLines.slice(b.startRaw, b.endRaw);
+        var result = ReaderUtils.wrapLines(chapterRaw, charsPerLine * 2);
         lines = result.lines;
-        chapterList = result.chapters;
+        currentChapterIdx = idx;
+        currentLine = 0;
+
+        // 恢复该章节的阅读进度
+        var saved = Storage.loadChapterProgress(progressStore, currentUrl, idx);
+        if (saved > 0) {
+            currentLine = Math.min(saved, maxStartLine());
+        }
+        clampCurrentLine();
+
+        // 滚动模式同步滚动位置
+        if (scrollMode) {
+            scrollFlickable.contentY = currentLine * getTextLineHeight();
+        }
+
+        updateChapterList();
+        updateScrollMax();
+        loadBookmarkList();
+        saveSettings();
+        isLoading = false;
+        statusMessage = "";
+    }
+
+    function updateChapterList() {
+        chapterList = [];
+        for (var i = 0; i < chapterBoundaries.length; i++) {
+            chapterList.push({ title: chapterBoundaries[i].title, lineIndex: i });
+        }
+    }
+
+    function processContent(content) {
+        try {
+            rawLines = ReaderUtils.splitIntoLines(content);
+            chapterBoundaries = scanChapterBoundaries(rawLines);
+
+            // 读取保存的进度 → 定位到对应章节
+            var saved = loadProgress(currentUrl);
+            var savedChapter = (saved && saved.chapterIdx !== undefined) ? saved.chapterIdx : 0;
+            if (savedChapter >= chapterBoundaries.length) savedChapter = 0;
+
+            loadChapter(savedChapter);
+        } catch (e) {
+            isLoading = false;
+            statusMessage = "";
+        }
+    }
+
+    function afterContentLoaded() {
+        // 兼容旧接口：setFontSize 等可能调用后调用此函数
+        // 现在由 loadChapter 处理加载完成后的初始化
     }
 
     function nextPage() {
@@ -763,9 +934,20 @@ Rectangle {
             return;
         var maxLine = maxStartLine();
         if (currentLine >= maxLine) {
+            if (currentChapterIdx < chapterBoundaries.length - 1) {
+                if (showNextChapter) {
+                    // 已显示"下一章"按钮，再次点击 → 加载下一章
+                    showNextChapter = false;
+                    saveProgress();
+                    loadChapter(currentChapterIdx + 1);
+                    return;
+                }
+                showNextChapter = true;
+            }
             autoScroll = false;
             return;
         }
+        showNextChapter = false;
 
         var newLine = Math.min(currentLine + getLinesPerPage(), maxLine);
         if (currentLine === newLine)
@@ -792,7 +974,7 @@ Rectangle {
         pageSlideAnim.start();
 
         // 内存中更新进度（数据库由防抖定时器写入）
-        Storage.updateProgressMemory(progressStore, currentUrl, fileName, newLine, lines.length);
+        Storage.updateProgressMemory(progressStore, currentUrl, fileName, newLine, lines.length, currentChapterIdx, calcBookPercent());
         flushDebounceTimer.restart();
     }
 
@@ -826,7 +1008,7 @@ Rectangle {
         pageSlideAnim.to = 0;
         pageSlideAnim.start();
 
-        Storage.updateProgressMemory(progressStore, currentUrl, fileName, newLine, lines.length);
+        Storage.updateProgressMemory(progressStore, currentUrl, fileName, newLine, lines.length, currentChapterIdx, calcBookPercent());
         flushDebounceTimer.restart();
     }
 
@@ -849,25 +1031,33 @@ Rectangle {
     }
 
     function jumpToChapter(offset) {
-        if (chapterList.length === 0)
-            return;
-        var currentIndex = 0;
-        for (var i = 0; i < chapterList.length; i++) {
-            if (chapterList[i].lineIndex <= currentLine)
-                currentIndex = i;
-        }
-        var nextIndex = Math.max(0, Math.min(chapterList.length - 1, currentIndex + offset));
-        currentLine = chapterList[nextIndex].lineIndex;
+        if (chapterBoundaries.length === 0) return;
+        var newIdx = currentChapterIdx + offset;
+        if (newIdx < 0 || newIdx >= chapterBoundaries.length) return;
+        if (newIdx === currentChapterIdx) return;
+        // 保存当前章节进度
         saveProgress();
+        // 加载新章节
+        loadChapter(newIdx);
     }
 
     function setFontSize(size) {
         var ratio = lines.length > 0 ? currentLine / lines.length : 0;
         baseFontSize = size;
         updateCharsPerLine();
-        if (currentUrl !== "") {
-            pendingProgressRatio = ratio;
-            loadFile(currentUrl);
+        if (currentUrl !== "" && currentChapterIdx >= 0 && chapterBoundaries.length > 0) {
+            // 重新加载当前章节（使用新字号换行），保持阅读比例
+            var b = chapterBoundaries[currentChapterIdx];
+            var chapterRaw = rawLines.slice(b.startRaw, b.endRaw);
+            var result = ReaderUtils.wrapLines(chapterRaw, charsPerLine * 2);
+            lines = result.lines;
+            currentLine = Math.min(Math.floor(ratio * lines.length), maxStartLine());
+            clampCurrentLine();
+            updateScrollMax();
+            if (scrollMode) {
+                scrollOffset = currentLine * getTextLineHeight();
+                scrollFlickable.contentY = Math.max(0, scrollOffset);
+            }
         }
         saveSettings();
     }
@@ -994,14 +1184,14 @@ Rectangle {
                 font.pixelSize: 10
                 color: uploaderAddress !== "" ? "#1565C0" : textColor
                 opacity: uploaderAddress !== "" ? 1.0 : 0.65
-                elide: Text.ElideMiddle
+                elide: Text.ElideLeft
                 horizontalAlignment: Text.AlignHCenter
                 font.family: "Microsoft YaHei"
             }
 
             Text {
                 width: parent.width
-                text: uploaderAddress !== "" ? "手机/电脑浏览器输入以上网址上传 txt" : uploaderStatus
+                text: uploaderAddress !== "" ? ("上传服务已启动  |  请在浏览器输入此网址上传小说") : uploaderStatus
                 font.pixelSize: 9
                 color: "#666666"
                 elide: Text.ElideRight
@@ -1118,7 +1308,7 @@ Rectangle {
                     border.color: "#A5D6A7"
                     Text {
                         anchors.centerIn: parent
-                        text: "QQ群 1040494353"
+                        text: "作者：skdkzzx"
                         font.pixelSize: 12
                         color: "#2E7D32"
                         font.family: "Microsoft YaHei"
@@ -1162,7 +1352,7 @@ Rectangle {
                 }
 
                 Text {
-                    width: parent.width - 64 - 52
+                    width: parent.width - 122
                     height: 24
                     text: "我的书架 (" + bookList.length + ")"
                     font.pixelSize: 14
@@ -1265,7 +1455,7 @@ Rectangle {
         visible: pageMode === "reader"
         clip: true
 
-        // 当前页文本
+        // 当前页文本（分页模式）
         Text {
             id: contentText
             anchors.left: parent.left
@@ -1275,7 +1465,7 @@ Rectangle {
             anchors.leftMargin: readerMargin
             anchors.rightMargin: readerMargin
             anchors.topMargin: readerMargin
-            anchors.bottomMargin: readerMargin
+            anchors.bottomMargin: readerMargin + (!scrollMode && showNextChapter ? 26 : 0)
             text: getPageText()
             font.family: "Microsoft YaHei"
             font.pixelSize: baseFontSize
@@ -1284,6 +1474,213 @@ Rectangle {
             color: textColor
             wrapMode: Text.NoWrap
             clip: true
+            visible: !scrollMode
+        }
+
+        // 滚动模式容器（Flickable 上下滚动查看全文）
+        Flickable {
+            id: scrollFlickable
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: readerMargin
+            anchors.rightMargin: readerMargin
+            anchors.topMargin: readerMargin
+            anchors.bottomMargin: readerMargin
+            visible: scrollMode
+            clip: true
+            contentWidth: width
+            contentHeight: scrollContentCol.height
+            boundsBehavior: Flickable.StopAtBounds
+            flickableDirection: Flickable.VerticalFlick
+            interactive: scrollMode
+            pixelAligned: true
+
+            // 滚动停止时保存阅读进度
+            onMovementEnded: {
+                if (scrollMode) {
+                    var line = Math.floor(contentY / getTextLineHeight());
+                    currentLine = Math.max(0, Math.min(line, Math.max(0, lines.length - getLinesPerPage())));
+                    Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent());
+                    flushDebounceTimer.restart();
+                }
+            }
+
+            Column {
+                id: scrollContentCol
+                width: parent.width
+                spacing: 0
+
+                // 章首"上一章"按钮（主题色填充）
+                Item {
+                    width: parent.width
+                    height: (scrollMode && currentChapterIdx > 0) ? 30 : 0
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 80
+                        height: 22
+                        radius: 2
+                        color: textColor
+                        visible: scrollMode && currentChapterIdx > 0
+                        Text {
+                            anchors.centerIn: parent
+                            text: "← 上一章"
+                            font.pixelSize: 11
+                            color: bgColor
+                            font.family: "Microsoft YaHei"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                saveProgress();
+                                loadChapter(currentChapterIdx - 1);
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    id: scrollFullText
+                    width: parent.width
+                    text: lines.join("\n")
+                    font.family: "Microsoft YaHei"
+                    font.pixelSize: baseFontSize
+                    lineHeightMode: Text.FixedHeight
+                    lineHeight: getTextLineHeight()
+                    color: textColor
+                    wrapMode: Text.NoWrap
+                }
+
+                // 章尾"下一章"按钮（主题色填充）
+                Item {
+                    width: parent.width
+                    height: (scrollMode && currentChapterIdx < chapterBoundaries.length - 1) ? 30 : 0
+                    Rectangle {
+                        anchors.centerIn: parent
+                        width: 80
+                        height: 22
+                        radius: 2
+                        color: textColor
+                        visible: scrollMode && currentChapterIdx < chapterBoundaries.length - 1
+                        Text {
+                            anchors.centerIn: parent
+                            text: "下一章 →"
+                            font.pixelSize: 11
+                            color: bgColor
+                            font.family: "Microsoft YaHei"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                saveProgress();
+                                loadChapter(currentChapterIdx + 1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 滚动模式点击/长按处理（放在 Flickable 外面，避免事件被吞）
+        MouseArea {
+            id: scrollOverlay
+            anchors.fill: scrollFlickable
+            visible: scrollMode
+            z: 10
+            preventStealing: false
+
+            property point pressPos
+            property bool dragged: false
+
+            onPressed: function(mouse) {
+                pressPos = Qt.point(mouse.x, mouse.y);
+                dragged = false;
+                mouse.accepted = false;
+            }
+
+            onPositionChanged: function(mouse) {
+                var dx = Math.abs(mouse.x - pressPos.x);
+                var dy = Math.abs(mouse.y - pressPos.y);
+                if (dx > 15 || dy > 15)
+                    dragged = true;
+                mouse.accepted = false;
+            }
+
+            onReleased: function(mouse) {
+                if (!dragged) {
+                    var clickX = pressPos.x;
+                    if (clickX < scrollFlickable.width / 3) {
+                        scrollFlickable.contentY = Math.max(0, scrollFlickable.contentY - scrollFlickable.height);
+                    } else if (clickX > scrollFlickable.width * 2 / 3) {
+                        scrollFlickable.contentY = Math.min(scrollFlickable.contentHeight - scrollFlickable.height, scrollFlickable.contentY + scrollFlickable.height);
+                    }
+                    // 中间区域不做任何操作
+                }
+                mouse.accepted = false;
+            }
+
+            onClicked: mouse.accepted = false
+        }
+
+        // 滚动模式浮动菜单按钮（右下角）
+        Rectangle {
+            id: scrollMenuBtn
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.rightMargin: 4
+            anchors.bottomMargin: 4
+            width: 28
+            height: 28
+            radius: 14
+            color: "#AA000000"
+            visible: scrollMode && activePanel === ""
+            z: 20
+
+            Text {
+                anchors.centerIn: parent
+                text: "☰"
+                font.pixelSize: 16
+                color: "#FFFFFF"
+                font.family: "Microsoft YaHei"
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                onClicked: {
+                    openPanel("menu");
+                }
+            }
+        }
+
+        // 分页模式章尾"下一章 →"按钮
+        Rectangle {
+            id: pageNextBtn
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 8
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: 100
+            height: 24
+            radius: 2
+            color: textColor
+            visible: !scrollMode && showNextChapter && currentChapterIdx < chapterBoundaries.length - 1
+            z: 30
+            Text {
+                anchors.centerIn: parent
+                text: "下一章 →"
+                font.pixelSize: 11
+                font.bold: true
+                color: bgColor
+                font.family: "Microsoft YaHei"
+            }
+            MouseArea {
+                anchors.fill: parent
+                onPressed: {
+                    showNextChapter = false;
+                    saveProgress();
+                    loadChapter(currentChapterIdx + 1);
+                }
+            }
         }
 
         // 翻页覆盖层（新页从右侧/左侧滑入覆盖旧页）
@@ -1377,7 +1774,8 @@ Rectangle {
         MouseArea {
             id: pageTouch
             anchors.fill: parent
-            enabled: activePanel === "" && !isLoading && !animating
+            z: 1
+            enabled: activePanel === "" && !isLoading && !animating && !scrollMode
             property real startX: 0
             property real startY: 0
             property bool moved: false
@@ -1423,12 +1821,16 @@ Rectangle {
                     return;
                 }
 
-                if (mouseX > width / 3 && mouseX < width * 2 / 3)
+                // 点击：左/中/右区域（用 onPressed 记录的位置，更可靠）
+                var clickX = startX;
+                var clickY = startY;
+                if (clickX > width / 3 && clickX < width * 2 / 3) {
                     openPanel("menu");
-                else if (mouseX < width / 3)
+                } else if (clickX < width / 3) {
                     prevPage();
-                else
+                } else {
                     nextPage();
+                }
             }
         }
     }
@@ -1704,11 +2106,14 @@ Rectangle {
                             }
                         }
                         MenuButton {
-                            label: "删除记录"
+                            label: scrollMode ? "📖分页" : "📜滚动"
                             w: (menuContent.width - 8) / 3
-                            bg: "#FFD0D0"
-                            fg: "#D32F2F"
-                            onClicked: deleteCurrentRecord()
+                            bg: scrollMode ? "#E8F5E9" : "#FFF3E0"
+                            fg: scrollMode ? "#2E7D32" : "#E65100"
+                            onClicked: {
+                                toggleScrollMode();
+                                closePanels();
+                            }
                         }
                     }
 
@@ -1865,8 +2270,10 @@ Rectangle {
                         id: chapterMouse
                         anchors.fill: parent
                         onClicked: {
-                            currentLine = modelData.lineIndex;
-                            saveProgress();
+                            if (modelData.lineIndex !== currentChapterIdx) {
+                                saveProgress();
+                                loadChapter(modelData.lineIndex);
+                            }
                             closePanels();
                         }
                     }
@@ -1985,6 +2392,10 @@ Rectangle {
                         anchors.fill: parent
                         z: 0
                         onClicked: {
+                            var bmChapter = parseInt(modelData.chapterIdx);
+                            if (!isNaN(bmChapter) && bmChapter !== currentChapterIdx) {
+                                loadChapter(bmChapter);
+                            }
                             currentLine = modelData.line;
                             clampCurrentLine();
                             saveProgress();
@@ -2154,7 +2565,7 @@ Rectangle {
     Rectangle {
         visible: isLoading
         anchors.centerIn: parent
-        width: 84
+        width: 110
         height: 24
         radius: 4
         color: "#FFFFFF"
@@ -2186,6 +2597,36 @@ Rectangle {
         z: 110
         onCloseClicked: showSponsor = false
         onQrClicked: sponsorQrIndex = sponsorQrIndex === 0 ? 1 : 0
+    }
+
+    // ====== Toast 提示 ======
+    Rectangle {
+        id: toast
+        visible: toastMessage !== ""
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 28
+        width: toastTxt.width + 24
+        height: 22
+        radius: 11
+        color: "#CC000000"
+        z: 200
+
+        Text {
+            id: toastTxt
+            anchors.centerIn: parent
+            text: toastMessage
+            font.pixelSize: 11
+            color: "#FFFFFF"
+            font.family: "Microsoft YaHei"
+        }
+    }
+
+    Timer {
+        id: toastTimer
+        interval: 2200
+        repeat: false
+        onTriggered: toastMessage = ""
     }
 
     YPagePopHelper {

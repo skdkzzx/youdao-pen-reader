@@ -10,6 +10,5 @@ if command -v node >/dev/null 2>&1; then
     exec node "$PLUGIN_DIR/uploader.js"
 fi
 
-echo "未找到 python3 或 node，无法启动小说上传服务。"
-echo "请在 Shell 插件中执行：which python3; which node; which busybox"
+echo "未找到 python3 或 node"
 exit 1
