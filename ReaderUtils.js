@@ -213,37 +213,85 @@ function getPageText(lines, currentLine, linesPerPage) {
 // ====== 内容处理（视觉宽度感知 + 单词边界保护） ======
 // charsPerLine 表示每行可容纳的中文字符数，视觉宽度预算 = charsPerLine * 2
 
-function processContent(content, charsPerLine) {
-    var maxVisualWidth = charsPerLine * 2;
-    var rawLines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-    var wrapped = [];
+// 将原始文本按换行符拆分为数组
+function splitIntoLines(content) {
+    return content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+}
+
+// 单遍 O(L) 换行处理：遍历每个字符，追踪视觉宽度和最佳断点，
+// 不创建中间子串，不重复扫描。
+function wrapLine(output, raw, maxWidth) {
+    var segStart = 0;
+    var lastBreak = 0;
+    var width = 0;
+
+    for (var j = 0; j < raw.length; j++) {
+        var code = raw.charCodeAt(j);
+        var cw = isWideChar(code) ? 2 : 1;
+
+        // 超出视觉宽度 → 切分
+        if (width + cw > maxWidth) {
+            var cut = lastBreak > segStart ? lastBreak : j;
+            if (cut === segStart) cut = Math.max(segStart + 1, j);
+            output.push(raw.substring(segStart, cut));
+            segStart = cut;
+            j = segStart - 1;   // for 循环会 +1
+            width = 0;
+            lastBreak = segStart;
+            continue;
+        }
+
+        width += cw;
+
+        // 判断当前位置是否为合适的断点
+        var isBreak = false;
+        if (code === 0x20 || code === 0x3000) {
+            isBreak = true;                 // ASCII/全角空格
+        } else if (isWideChar(code)) {
+            isBreak = true;                 // CJK 字符：每个都可断开
+        } else if (j + 1 < raw.length) {
+            var next = raw.charCodeAt(j + 1);
+            if (isWideChar(next) || next === 0x20 || next === 0x3000) {
+                isBreak = true;             // 英文字符后紧跟 CJK/空格
+            }
+        }
+
+        if (isBreak) lastBreak = j + 1;
+    }
+
+    // 收尾部分
+    if (segStart < raw.length) {
+        output.push(raw.substring(segStart));
+    }
+}
+
+// 处理原始行数组（可复用给分块加载）
+function wrapLines(rawLines, maxVisualWidth) {
+    var output = [];
     var chapters = [];
-    // 支持中文和英文章节标题
     var chapterRegex = /^(第[一二三四五六七八九十百千零\d]+[章节回集卷部篇]|Chapter\s+\d+|CHAPTER\s+\d+|Part\s+\d+|PART\s+\d+)/;
 
     for (var i = 0; i < rawLines.length; i++) {
         var raw = rawLines[i];
         var title = raw.trim();
         if (title.length > 0 && title.length < 60 && chapterRegex.test(title)) {
-            chapters.push({ title: title, lineIndex: wrapped.length });
+            chapters.push({ title: title, lineIndex: output.length });
         }
 
         if (raw.length === 0) {
-            wrapped.push("");
+            output.push("");
         } else {
-            var rest = raw;
-            while (visualWidth(rest) > maxVisualWidth) {
-                var splitIdx = findSplitPoint(rest, maxVisualWidth);
-                // 确保至少切一个字符，防止死循环
-                if (splitIdx <= 0) splitIdx = 1;
-                wrapped.push(rest.substring(0, splitIdx));
-                rest = rest.substring(splitIdx);
-            }
-            wrapped.push(rest);
+            wrapLine(output, raw, maxVisualWidth);
         }
     }
 
-    return { lines: wrapped, chapters: chapters };
+    return { lines: output, chapters: chapters };
+}
+
+// 完整处理（兼容旧接口，内部使用新算法）
+function processContent(content, charsPerLine) {
+    var rawLines = splitIntoLines(content);
+    return wrapLines(rawLines, charsPerLine * 2);
 }
 
 function buildBookList(folderScanAvailable, bookFolderModel, progressStore, defaultBookFolder) {
@@ -259,13 +307,14 @@ function buildBookList(folderScanAvailable, bookFolderModel, progressStore, defa
             var progressItem = progressStore[url] || {};
             var line = parseInt(progressItem.line) || 0;
             var totalLines = parseInt(progressItem.totalLines) || 0;
+            var bp = parseInt(progressItem.bookPercent);
             items.push({
                 file: url,
                 name: bookTitle(url),
                 line: line,
                 totalLines: totalLines,
                 timestamp: parseInt(progressItem.timestamp) || 0,
-                progress: progressFromLine(line, totalLines)
+                progress: isNaN(bp) ? progressFromLine(line, totalLines) : bp
             });
         }
     }
@@ -275,13 +324,14 @@ function buildBookList(folderScanAvailable, bookFolderModel, progressStore, defa
         var item = progressStore[file];
         var itemFile = item.file || file;
         if (folderScanAvailable && isDefaultBookFile(itemFile)) continue;
+        var bp2 = parseInt(item.bookPercent);
         items.push({
             file: itemFile,
             name: bookTitle(item.name || itemFile),
             line: parseInt(item.line) || 0,
             totalLines: parseInt(item.totalLines) || 0,
             timestamp: parseInt(item.timestamp) || 0,
-            progress: progressFromLine(parseInt(item.line) || 0, parseInt(item.totalLines) || 0)
+            progress: isNaN(bp2) ? progressFromLine(parseInt(item.line) || 0, parseInt(item.totalLines) || 0) : bp2
         });
     }
     items.sort(function (a, b) {
