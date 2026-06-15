@@ -1,6 +1,6 @@
-# 电子书阅读器 v6.2.0
+# 电子书阅读器 v6.5.0
 
-[许可证: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)(https://www.gnu.org/licenses/gpl-3.0)
+[许可证: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)（https://www.gnu.org/licenses/gpl-3.0）
 
 一款专为词典笔设计的小说阅读器插件，支持本地 `.txt` 小说阅读，并提供局域网网页上传功能，让你轻松在词典笔上看小说。
 
