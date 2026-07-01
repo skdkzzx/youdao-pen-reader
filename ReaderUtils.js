@@ -331,8 +331,11 @@ function buildBookList(folderScanAvailable, bookFolderModel, progressStore, defa
         if (seen[file]) continue;
         var item = progressStore[file];
         var itemFile = item.file || file;
-        // 默认目录的书只来自文件夹扫描，progressStore中的已删除文件不显示
+        // 只要在 /userdisk/Music/ 下的书都只来自文件夹扫描，删了就消失
         if (isDefaultBookFile(itemFile)) continue;
+        var p = stripFilePrefix(itemFile).replace(/\\/g, "/").toLowerCase();
+        try { p = decodeURIComponent(p); } catch(e) {}
+        if (p.indexOf("/userdisk/music/") === 0) continue;
         var bp2 = parseInt(item.bookPercent);
         items.push({
             file: itemFile,
