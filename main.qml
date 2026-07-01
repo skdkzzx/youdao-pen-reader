@@ -157,6 +157,9 @@ Rectangle {
     property string chapterSearchQuery: ""      // 章节搜索关键字
     property var filteredChapterList: []        // 过滤后的章节列表
 
+    // ====== 面板/菜单状态 ======
+    property bool readerTextVisible: true // 面板打开时隐藏阅读器文本防卡顿
+
     // ====== 手势设置 ======
     property bool tripleTapHome: false    // 三击返回首页
     property var tapTimestamps: []        // 点击时间戳队列
@@ -830,20 +833,11 @@ Rectangle {
 
     function closePanels() {
         activePanel = "";
-        // 恢复阅读器文本显示（大文件时菜单/面板覆盖不卡顿）
-        if (pageMode === "reader") {
-            contentText.visible = !scrollMode;
-            scrollFlickable.visible = scrollMode;
-            pageNextBtn.visible = !scrollMode && showNextChapter && currentChapterIdx < chapterBoundaries.length - 1;
-        }
+        readerTextVisible = true;
     }
 
     function openPanel(name) {
-        if (pageMode === "reader") {
-            // 打开面板时隐藏阅读器文本，避免大文件卡顿
-            contentText.visible = false;
-            scrollFlickable.visible = false;
-        }
+        readerTextVisible = false;
         if (name === "bookmarks")
             loadBookmarkList();
         activePanel = name;
@@ -1649,7 +1643,7 @@ Rectangle {
             color: textColor
             wrapMode: Text.NoWrap
             clip: true
-            visible: !scrollMode
+            visible: !scrollMode && readerTextVisible
         }
 
         // 滚动模式容器（Flickable 上下滚动查看全文）
@@ -1663,7 +1657,7 @@ Rectangle {
             anchors.rightMargin: readerMargin
             anchors.topMargin: readerMargin
             anchors.bottomMargin: readerMargin
-            visible: scrollMode
+            visible: scrollMode && readerTextVisible
             clip: true
             contentWidth: width
             contentHeight: scrollContentCol.height
