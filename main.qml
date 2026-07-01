@@ -609,7 +609,7 @@ Rectangle {
         if (bookFolderModel)
             return;
         try {
-            var folderUrl = "file://" + encodeURI(defaultBookFolder);
+            var folderUrl = "file://" + defaultBookFolder;
             var qml = "import QtQuick 2.15\nimport Qt.labs.folderlistmodel 2.1\nFolderListModel {\n" +
                 "    folder: \"" + folderUrl + "\"\n" +
                 "    nameFilters: [\"*.txt\", \"*.TXT\"]\n" +

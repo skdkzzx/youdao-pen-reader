@@ -331,7 +331,8 @@ function buildBookList(folderScanAvailable, bookFolderModel, progressStore, defa
         if (seen[file]) continue;
         var item = progressStore[file];
         var itemFile = item.file || file;
-        if (folderScanAvailable && isDefaultBookFile(itemFile)) continue;
+        // 默认目录的书只来自文件夹扫描，progressStore中的已删除文件不显示
+        if (isDefaultBookFile(itemFile)) continue;
         var bp2 = parseInt(item.bookPercent);
         items.push({
             file: itemFile,
