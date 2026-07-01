@@ -118,6 +118,7 @@ Rectangle {
     property var bookmarkList: []
     property var progressStore: ({})
     property var bookmarksStore: ({})
+    property var readingTimeData: ({})    // url -> 累计阅读秒数
     property string lastFilePath: ""
     property var bookFolderModel: null
     property bool folderScanAvailable: false
@@ -127,8 +128,12 @@ Rectangle {
     property string uploaderAddress: ""
     property string uploaderOutput: ""
     property bool showSponsor: false
-    property var shelfContextItem: null   // 书架长按菜单的目标书籍
-    property bool showShelfMenu: false    // 书架上下文菜单
+    property var shelfContextItem: null     // 书架长按菜单的目标书籍
+    property bool showShelfMenu: false      // 书架上下文菜单
+    property bool showBookInfo: false       // 书籍信息面板
+    property var bookInfoItem: null         // 当前查看的书籍信息
+    // 书籍信息缓存（key -> {chars, chapters, readingTime}）
+    property var bookInfoCache: ({})
     property int sponsorQrIndex: 0
     property bool showTutorial: false
     property int tutorialLine: 0
@@ -141,6 +146,10 @@ Rectangle {
     property bool scrollMode: false
     property real scrollOffset: 0
     property real scrollMax: 0
+
+    // ====== 手势设置 ======
+    property bool tripleTapHome: false    // 三击返回首页
+    property var tapTimestamps: []        // 点击时间戳队列
 
     // ====== Toast ======
     property string toastMessage: ""
@@ -194,6 +203,18 @@ Rectangle {
             }
             Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent());
             Storage.flushProgressStore(progressStore);
+        }
+    }
+
+    // 阅读计时器（每秒累计当前书籍阅读时长）
+    Timer {
+        id: readingTimer
+        interval: 1000
+        repeat: true
+        running: pageMode === "reader" && currentUrl !== "" && !isLoading
+        onTriggered: {
+            if (currentUrl === "") return;
+            readingTimeData[currentUrl] = (readingTimeData[currentUrl] || 0) + 1;
         }
     }
 
@@ -451,6 +472,8 @@ Rectangle {
     // 保存进度到内存并立即写入文件
     function saveProgress() {
         Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent());
+        if (currentUrl && readingTimeData[currentUrl] !== undefined)
+            progressStore[currentUrl].readingTime = readingTimeData[currentUrl];
         Storage.flushProgressStore(progressStore);
     }
 
@@ -459,7 +482,20 @@ Rectangle {
         if (currentUrl === "")
             return;
         Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent());
+        if (currentUrl && readingTimeData[currentUrl] !== undefined)
+            progressStore[currentUrl].readingTime = readingTimeData[currentUrl];
         Storage.flushProgressStore(progressStore);
+    }
+
+    // 格式化阅读时长（秒 -> "X时X分" / "X分X秒" / "X秒"）
+    function formatReadingTime(seconds) {
+        if (!seconds || seconds < 0) return "0秒";
+        var h = Math.floor(seconds / 3600);
+        var m = Math.floor((seconds % 3600) / 60);
+        var s = seconds % 60;
+        if (h > 0) return h + "时" + m + "分";
+        if (m > 0) return m + "分" + s + "秒";
+        return s + "秒";
     }
 
     function loadProgress(url) {
@@ -477,7 +513,8 @@ Rectangle {
             themeName: themeName,
             lastFile: lastFilePath,
             autoScrollSeconds: autoScrollSeconds,
-            scrollMode: scrollMode
+            scrollMode: scrollMode,
+            tripleTapHome: tripleTapHome
         };
         Storage.saveSettingsToStore(settings);
     }
@@ -499,6 +536,7 @@ Rectangle {
         } else {
             autoScrollSeconds = 2;
         }
+        tripleTapHome = settings.tripleTapHome === true;
         charsPerLine = ReaderUtils.updateCharsPerLine(baseFontSize);
     }
 
@@ -1002,6 +1040,9 @@ Rectangle {
             var saved = loadProgress(currentUrl);
             var savedChapter = (saved && saved.chapterIdx !== undefined) ? saved.chapterIdx : 0;
             if (savedChapter >= chapterBoundaries.length) savedChapter = 0;
+
+            // 恢复阅读时长
+            readingTimeData[currentUrl] = (saved && saved.readingTime !== undefined) ? saved.readingTime : 0;
 
             loadChapter(savedChapter);
         } catch (e) {
@@ -1880,6 +1921,20 @@ Rectangle {
                     return;
                 }
 
+                // 三击检测
+                if (tripleTapHome) {
+                    var now = new Date().getTime();
+                    tapTimestamps.push(now);
+                    // 只保留最近 700ms 内的点击
+                    while (tapTimestamps.length > 0 && tapTimestamps[0] < now - 700)
+                        tapTimestamps.shift();
+                    if (tapTimestamps.length >= 3) {
+                        tapTimestamps = [];
+                        returnToHome();
+                        return;
+                    }
+                }
+
                 // 点击：左/中/右区域（用 onPressed 记录的位置，更可靠）
                 var clickX = startX;
                 var clickY = startY;
@@ -2736,6 +2791,66 @@ Rectangle {
                         }
                     }
 
+                    // 手势设置
+                    Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
+
+                    Text {
+                        text: "手势"
+                        font.pixelSize: 11
+                        font.bold: true
+                        color: textColor
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        height: 28
+                        radius: 3
+                        color: "#F5F5F5"
+                        border.color: "#DDDDDD"
+
+                        Row {
+                            anchors.fill: parent
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 8
+                            spacing: 4
+
+                            Text {
+                                text: "三击返回首页"
+                                font.pixelSize: 11
+                                color: "#333"
+                                anchors.verticalCenter: parent.verticalCenter
+                                font.family: "Microsoft YaHei"
+                            }
+                            Item { width: parent.width - 110; height: 1 }
+
+                            Rectangle {
+                                width: 40
+                                height: 20
+                                radius: 10
+                                color: tripleTapHome ? "#4CAF50" : "#CCCCCC"
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                Rectangle {
+                                    x: tripleTapHome ? 22 : 2
+                                    y: 2
+                                    width: 16
+                                    height: 16
+                                    radius: 8
+                                    color: "#FFFFFF"
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        tripleTapHome = !tripleTapHome;
+                                        saveSettings();
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     Item { width: parent.width; height: 4 }
                 }
             }
@@ -2758,7 +2873,7 @@ Rectangle {
         Rectangle {
             anchors.centerIn: parent
             width: parent.width - 60
-            height: 116
+            height: 148
             radius: 8
             color: bgColor === "#263238" ? "#37474F" : "#FFFFFF"
             border.color: "#CCCCCC"
@@ -2781,6 +2896,47 @@ Rectangle {
                 Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
 
                 MenuButton {
+                    label: "书籍信息"
+                    w: parent.width
+                    h: 24
+                    bg: "#E3F2FD"
+                    fg: "#1565C0"
+                    onClicked: {
+                        showShelfMenu = false;
+                        bookInfoItem = shelfContextItem;
+                        // 收集书籍信息
+                        var info = bookInfoCache[shelfContextItem.file] || { chars: 0, chapters: 0, loaded: false };
+                        if (!info.loaded) {
+                            try {
+                                var xhr = new XMLHttpRequest();
+                                xhr.open("GET", shelfContextItem.file, false);
+                                xhr.send();
+                                if (xhr.status === 200 || xhr.status === 0) {
+                                    var content = xhr.responseText || "";
+                                    info.chars = content.length;
+                                    info.chapters = 0;
+                                    var lines = content.split("\n");
+                                    var re = ReaderUtils.getChapterRegex();
+                                    for (var i = 0; i < lines.length; i++) {
+                                        if (re.test(lines[i].trim())) info.chapters++;
+                                    }
+                                    if (info.chapters === 0) info.chapters = 1;
+                                    info.loaded = true;
+                                    bookInfoCache[shelfContextItem.file] = info;
+                                }
+                            } catch(e) {}
+                        }
+                        bookInfoItem = {
+                            file: shelfContextItem.file,
+                            name: shelfContextItem.name,
+                            chars: info.chars,
+                            chapters: info.chapters,
+                            readingTime: readingTimeData[shelfContextItem.file] || 0
+                        };
+                        showBookInfo = true;
+                    }
+                }
+                MenuButton {
                     label: "重命名"
                     w: parent.width
                     h: 24
@@ -2799,6 +2955,95 @@ Rectangle {
                     w: parent.width
                     h: 24
                     onClicked: shelfDeleteRecord(shelfContextItem)
+                }
+            }
+        }
+    }
+
+    // ====== 书籍信息面板 ======
+    Rectangle {
+        id: bookInfoPanel
+        visible: showBookInfo
+        anchors.fill: parent
+        anchors.margins: 10
+        radius: 6
+        color: bgColor === "#263238" ? "#37474F" : "#FFFFFF"
+        border.color: "#CCCCCC"
+        z: 60
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 8
+            spacing: 5
+
+            Row {
+                width: parent.width
+                height: 24
+                Text {
+                    width: parent.width - 30
+                    text: bookInfoItem ? bookInfoItem.name : ""
+                    font.pixelSize: 12
+                    font.bold: true
+                    color: textColor
+                    elide: Text.ElideRight
+                    verticalAlignment: Text.AlignVCenter
+                    font.family: "Microsoft YaHei"
+                }
+                MenuButton {
+                    label: "x"
+                    w: 24
+                    h: 24
+                    onClicked: showBookInfo = false
+                }
+            }
+
+            Flickable {
+                width: parent.width
+                height: parent.height - 34
+                contentWidth: width
+                contentHeight: infoCol.height
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
+                Column {
+                    id: infoCol
+                    width: parent.width
+                    spacing: 5
+
+                    Row {
+                        width: parent.width
+                        spacing: 4
+                        Text { text: "总字数"; font.pixelSize: 10; color: "#888"; font.family: "Microsoft YaHei"; width: parent.width / 3 }
+                        Text { text: "章节数"; font.pixelSize: 10; color: "#888"; font.family: "Microsoft YaHei"; width: parent.width / 3 }
+                        Text { text: "阅读时长"; font.pixelSize: 10; color: "#888"; font.family: "Microsoft YaHei"; width: parent.width / 3 }
+                    }
+                    Row {
+                        width: parent.width
+                        spacing: 4
+                        Text { text: bookInfoItem ? ReaderUtils.formatNumber(bookInfoItem.chars) : "0"; font.pixelSize: 14; font.bold: true; color: textColor; font.family: "Microsoft YaHei"; width: parent.width / 3 }
+                        Text { text: bookInfoItem ? bookInfoItem.chapters : "0"; font.pixelSize: 14; font.bold: true; color: textColor; font.family: "Microsoft YaHei"; width: parent.width / 3 }
+                        Text { text: bookInfoItem ? formatReadingTime(bookInfoItem.readingTime) : "0"; font.pixelSize: 14; font.bold: true; color: textColor; font.family: "Microsoft YaHei"; width: parent.width / 3 }
+                    }
+
+                    Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
+
+                    Row {
+                        width: parent.width; spacing: 4
+                        Text { text: "文件"; font.pixelSize: 10; color: "#888"; font.family: "Microsoft YaHei"; width: 40 }
+                        Text { text: bookInfoItem ? bookInfoItem.name : ""; font.pixelSize: 10; color: textColor; elide: Text.ElideRight; font.family: "Microsoft YaHei"; width: parent.width - 44 }
+                    }
+                    Row {
+                        width: parent.width; spacing: 4
+                        Text { text: "路径"; font.pixelSize: 10; color: "#888"; font.family: "Microsoft YaHei"; width: 40 }
+                        Text { text: bookInfoItem ? ReaderUtils.stripFilePrefix(bookInfoItem.file) : ""; font.pixelSize: 9; color: "#888"; elide: Text.ElideLeft; font.family: "Microsoft YaHei"; width: parent.width - 44 }
+                    }
+
+                    MenuButton {
+                        label: "关闭"
+                        w: parent.width
+                        h: 24
+                        onClicked: showBookInfo = false
+                    }
                 }
             }
         }

@@ -394,3 +394,9 @@ function getUploaderUrl(output) {
     var match = output.match(/http:\/\/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:8088/);
     return match ? match[0] : "";
 }
+
+// 数字格式化（12345 -> "12,345"）
+function formatNumber(n) {
+    if (n === undefined || n === null) return "0";
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
