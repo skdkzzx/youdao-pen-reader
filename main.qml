@@ -109,6 +109,8 @@ Rectangle {
             return shelfPage;
         if (mode === "reader")
             return readerPage;
+        if (mode === "settings")
+            return settingsPage;
         return null;
     }
 
@@ -121,7 +123,6 @@ Rectangle {
     property var readingTimeData: ({})    // url -> 累计阅读秒数
     property string lastFilePath: ""
     property var bookFolderModel: null
-    property var bookFolderModelNovels: null  // 扫描 /userdisk/Music/小说/ 子目录
     property bool folderScanAvailable: false
     property var uploaderController: (typeof shellPluginController !== "undefined") ? shellPluginController : null
     property bool uploaderStarted: false
@@ -543,24 +544,6 @@ Rectangle {
 
     function loadBookList() {
         bookList = ReaderUtils.buildBookList(folderScanAvailable, bookFolderModel, progressStore, defaultBookFolder);
-        // 合并小说子目录的扫描结果
-        if (folderScanAvailable && bookFolderModelNovels && bookFolderModelNovels.count > 0) {
-            var novelBooks = ReaderUtils.buildBookList(folderScanAvailable, bookFolderModelNovels, progressStore, defaultBookFolder);
-            var seen = {};
-            for (var i = 0; i < bookList.length; i++)
-                seen[bookList[i].file] = true;
-            for (var j = 0; j < novelBooks.length; j++) {
-                if (!seen[novelBooks[j].file]) {
-                    seen[novelBooks[j].file] = true;
-                    bookList.push(novelBooks[j]);
-                }
-            }
-            bookList.sort(function(a, b) {
-                if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
-                return a.name.localeCompare(b.name);
-            });
-            if (bookList.length > 50) bookList = bookList.slice(0, 50);
-        }
     }
 
     // 书架长按菜单：重命名
@@ -584,10 +567,6 @@ Rectangle {
                     try { bookFolderModel.destroy(); } catch(e) {}
                     bookFolderModel = null;
                 }
-                if (bookFolderModelNovels) {
-                    try { bookFolderModelNovels.destroy(); } catch(e) {}
-                    bookFolderModelNovels = null;
-                }
                 folderScanAvailable = false;
                 startBookFolderScan();
                 loadBookList();
@@ -610,10 +589,6 @@ Rectangle {
                 try { bookFolderModel.destroy(); } catch(e) {}
                 bookFolderModel = null;
             }
-            if (bookFolderModelNovels) {
-                try { bookFolderModelNovels.destroy(); } catch(e) {}
-                bookFolderModelNovels = null;
-            }
             folderScanAvailable = false;
             startBookFolderScan();
             loadBookList();
@@ -634,29 +609,17 @@ Rectangle {
         if (bookFolderModel)
             return;
         try {
-            // 扫描主目录 /userdisk/Music/（兼容旧文件）
-            var parentUrl = "file://" + encodeURI("/userdisk/Music/");
-            var qml1 = "import QtQuick 2.15\nimport Qt.labs.folderlistmodel 2.1\nFolderListModel {\n" +
-                "    folder: \"" + parentUrl + "\"\n" +
+            var folderUrl = "file://" + encodeURI(defaultBookFolder);
+            var qml = "import QtQuick 2.15\nimport Qt.labs.folderlistmodel 2.1\nFolderListModel {\n" +
+                "    folder: \"" + folderUrl + "\"\n" +
                 "    nameFilters: [\"*.txt\", \"*.TXT\"]\n" +
                 "    showDirs: false\n showFiles: true\n showDotAndDotDot: false\n sortField: FolderListModel.Name\n}";
-            bookFolderModel = Qt.createQmlObject(qml1, root, "BookFolderModel");
+            bookFolderModel = Qt.createQmlObject(qml, root, "BookFolderModel");
             bookFolderModel.countChanged.connect(loadBookList);
-
-            // 扫描子目录 /userdisk/Music/小说/（新文件）
-            var novelsUrl = "file://" + encodeURI("/userdisk/Music/小说/");
-            var qml2 = "import QtQuick 2.15\nimport Qt.labs.folderlistmodel 2.1\nFolderListModel {\n" +
-                "    folder: \"" + novelsUrl + "\"\n" +
-                "    nameFilters: [\"*.txt\", \"*.TXT\"]\n" +
-                "    showDirs: false\n showFiles: true\n showDotAndDotDot: false\n sortField: FolderListModel.Name\n}";
-            bookFolderModelNovels = Qt.createQmlObject(qml2, root, "BookFolderModelNovels");
-            bookFolderModelNovels.countChanged.connect(loadBookList);
-
             folderScanAvailable = true;
             loadBookList();
         } catch (e) {
             bookFolderModel = null;
-            bookFolderModelNovels = null;
             folderScanAvailable = false;
         }
     }
@@ -1383,7 +1346,7 @@ Rectangle {
                     }
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: activePanel = "settings"
+                        onClicked: navigateTo("settings")
                     }
                 }
             }
@@ -1987,6 +1950,160 @@ Rectangle {
                     prevPage();
                 } else {
                     nextPage();
+                }
+            }
+        }
+    }
+
+    Item {
+        id: settingsPage
+        anchors.fill: parent
+        visible: pageMode === "settings"
+        clip: true
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 6
+            spacing: 4
+
+            Row {
+                width: parent.width
+                height: 24
+                spacing: 6
+
+                Rectangle {
+                    width: 50
+                    height: 24
+                    radius: 4
+                    color: "#DDDDDD"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "返回"
+                        font.pixelSize: 11
+                        color: "#333333"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: navigateBack()
+                    }
+                }
+
+                Text {
+                    width: parent.width - 102
+                    height: 24
+                    text: "设置"
+                    font.pixelSize: 13
+                    font.bold: true
+                    color: textColor
+                    verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignHCenter
+                    font.family: "Microsoft YaHei"
+                }
+
+                Rectangle {
+                    width: 40
+                    height: 24
+                    radius: 4
+                    color: "#E3F2FD"
+                    border.color: "#BBDEFB"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "关于"
+                        font.pixelSize: 10
+                        color: "#1565C0"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: showToast("电子书阅读器 v6.5.0")
+                    }
+                }
+            }
+
+            Flickable {
+                width: parent.width
+                height: parent.height - 28
+                contentWidth: width
+                contentHeight: settingsCol.height
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
+                Column {
+                    id: settingsCol
+                    width: parent.width
+                    spacing: 6
+
+                    Text {
+                        width: parent.width
+                        text: "小说目录：" + defaultBookFolder
+                        font.pixelSize: 9
+                        color: "#888"
+                        wrapMode: Text.WordWrap
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    // 手势设置
+                    Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
+
+                    Text {
+                        text: "手势"
+                        font.pixelSize: 11
+                        font.bold: true
+                        color: textColor
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        height: 28
+                        radius: 3
+                        color: "#F5F5F5"
+                        border.color: "#DDDDDD"
+
+                        Row {
+                            anchors.fill: parent
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 8
+                            spacing: 4
+
+                            Text {
+                                text: "三击返回首页"
+                                font.pixelSize: 11
+                                color: "#333"
+                                anchors.verticalCenter: parent.verticalCenter
+                                font.family: "Microsoft YaHei"
+                            }
+                            Item { width: parent.width - 110; height: 1 }
+
+                            Rectangle {
+                                width: 40
+                                height: 20
+                                radius: 10
+                                color: tripleTapHome ? "#4CAF50" : "#CCCCCC"
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                Rectangle {
+                                    x: tripleTapHome ? 22 : 2
+                                    y: 2
+                                    width: 16
+                                    height: 16
+                                    radius: 8
+                                    color: "#FFFFFF"
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        tripleTapHome = !tripleTapHome;
+                                        saveSettings();
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Item { width: parent.width; height: 8 }
                 }
             }
         }
@@ -2714,195 +2831,6 @@ Rectangle {
         }
     }
 
-    // ====== 设置面板 ======
-    Rectangle {
-        id: settingsPanel
-        visible: activePanel === "settings"
-        anchors.fill: parent
-        anchors.margins: 10
-        radius: 6
-        color: bgColor === "#263238" ? "#37474F" : "#FFFFFF"
-        border.color: "#CCCCCC"
-        z: 60
-
-        Column {
-            anchors.fill: parent
-            anchors.margins: 8
-            spacing: 6
-
-            Row {
-                width: parent.width
-                height: 24
-                Text {
-                    width: parent.width - 30
-                    text: "设置"
-                    font.pixelSize: 13
-                    font.bold: true
-                    color: textColor
-                    verticalAlignment: Text.AlignVCenter
-                    font.family: "Microsoft YaHei"
-                }
-                MenuButton {
-                    label: "x"
-                    w: 24
-                    h: 24
-                    onClicked: closePanels()
-                }
-            }
-
-            Flickable {
-                width: parent.width
-                height: parent.height - 34
-                contentWidth: width
-                contentHeight: settingsCol.height
-                clip: true
-                boundsBehavior: Flickable.StopAtBounds
-
-                Column {
-                    id: settingsCol
-                    width: parent.width
-                    spacing: 6
-
-                    Text {
-                        width: parent.width
-                        text: "小说目录：" + defaultBookFolder
-                        font.pixelSize: 9
-                        color: "#888"
-                        wrapMode: Text.WordWrap
-                        font.family: "Microsoft YaHei"
-                    }
-
-                    // 迁移工具
-                    Rectangle {
-                        width: parent.width
-                        height: 50
-                        radius: 4
-                        color: "#FFF8E1"
-                        border.color: "#FFE082"
-
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 6
-                            spacing: 4
-
-                            Text {
-                                text: "迁移旧目录中的小说"
-                                font.pixelSize: 11
-                                font.bold: true
-                                color: "#E65100"
-                                font.family: "Microsoft YaHei"
-                            }
-                            Text {
-                                text: "将 /userdisk/Music/ 下的 .txt 文件\n迁移到 " + defaultBookFolder
-                                font.pixelSize: 9
-                                color: "#BF360C"
-                                wrapMode: Text.WordWrap
-                                font.family: "Microsoft YaHei"
-                            }
-                        }
-                    }
-
-                    MenuButton {
-                        label: "开始迁移"
-                        w: parent.width
-                        h: 26
-                        bg: "#FF8F00"
-                        fg: "#fff"
-                        onClicked: {
-                            closePanels();
-                            showToast("迁移中...");
-                            // 先创建目标目录
-                            try {
-                                if (typeof shellPluginController !== "undefined" && shellPluginController)
-                                    shellPluginController.sendCommand("mkdir -p /userdisk/Music/小说");
-                            } catch(e) {}
-                            // 移动所有 .txt 文件（排除已在 小说/ 下的）
-                            try {
-                                if (typeof shellPluginController !== "undefined" && shellPluginController)
-                                    shellPluginController.sendCommand("for f in /userdisk/Music/*.txt /userdisk/Music/*.TXT; do [ -f \"$f\" ] && mv \"$f\" /userdisk/Music/小说/ 2>/dev/null; done; echo done");
-                            } catch(e) {}
-                            Qt.callLater(function() {
-                                if (bookFolderModel) {
-                                    try { bookFolderModel.destroy(); } catch(e) {}
-                                    bookFolderModel = null;
-                                }
-                                if (bookFolderModelNovels) {
-                                    try { bookFolderModelNovels.destroy(); } catch(e) {}
-                                    bookFolderModelNovels = null;
-                                }
-                                folderScanAvailable = false;
-                                startBookFolderScan();
-                                loadBookList();
-                                showToast("迁移完成");
-                            });
-                        }
-                    }
-
-                    // 手势设置
-                    Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
-
-                    Text {
-                        text: "手势"
-                        font.pixelSize: 11
-                        font.bold: true
-                        color: textColor
-                        font.family: "Microsoft YaHei"
-                    }
-
-                    Rectangle {
-                        width: parent.width
-                        height: 28
-                        radius: 3
-                        color: "#F5F5F5"
-                        border.color: "#DDDDDD"
-
-                        Row {
-                            anchors.fill: parent
-                            anchors.leftMargin: 8
-                            anchors.rightMargin: 8
-                            spacing: 4
-
-                            Text {
-                                text: "三击返回首页"
-                                font.pixelSize: 11
-                                color: "#333"
-                                anchors.verticalCenter: parent.verticalCenter
-                                font.family: "Microsoft YaHei"
-                            }
-                            Item { width: parent.width - 110; height: 1 }
-
-                            Rectangle {
-                                width: 40
-                                height: 20
-                                radius: 10
-                                color: tripleTapHome ? "#4CAF50" : "#CCCCCC"
-                                anchors.verticalCenter: parent.verticalCenter
-
-                                Rectangle {
-                                    x: tripleTapHome ? 22 : 2
-                                    y: 2
-                                    width: 16
-                                    height: 16
-                                    radius: 8
-                                    color: "#FFFFFF"
-                                }
-
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        tripleTapHome = !tripleTapHome;
-                                        saveSettings();
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Item { width: parent.width; height: 4 }
-                }
-            }
-        }
-    }
 
     // ====== 书架长按菜单 ======
     Rectangle {
