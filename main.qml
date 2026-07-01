@@ -2266,7 +2266,7 @@ Rectangle {
                     border.color: chapterSearchQuery !== "" ? "#EF9A9A" : "#BBDEFB"
                     Text {
                         anchors.centerIn: parent
-                        text: chapterSearchQuery !== "" ? "x" : "搜"
+                        text: chapterSearchQuery !== "" ? "x" : "搜索"
                         font.pixelSize: 11
                         color: chapterSearchQuery !== "" ? "#D32F2F" : "#1565C0"
                         font.family: "Microsoft YaHei"
@@ -2444,25 +2444,26 @@ Rectangle {
                 Column {
                     id: menuContent
                     width: parent.width
-                    spacing: 5
+                    spacing: 4
 
+                    // 进度 + 阅读时长
                     Text {
                         width: parent.width
-                        text: "进度: " + getProgressPercent() + "% (" + getCurrentPage() + "/" + getTotalPages() + "页)"
-                        font.pixelSize: 11
-                        color: textColor
+                        text: "进度: " + getProgressPercent() + "% (" + getCurrentPage() + "/" + getTotalPages() + "页)    阅读: " + formatReadingTime(readingTimeData[currentUrl])
+                        font.pixelSize: 9
+                        color: "#888"
                         font.family: "Microsoft YaHei"
                     }
 
                     Rectangle {
                         width: parent.width
-                        height: 12
-                        radius: 6
-                        color: "#CCCCCC"
+                        height: 10
+                        radius: 5
+                        color: "#DDDDDD"
                         Rectangle {
                             width: parent.width * (getProgressPercent() / 100)
                             height: parent.height
-                            radius: 6
+                            radius: 5
                             color: "#2f7dcc"
                         }
                         MouseArea {
@@ -2471,213 +2472,71 @@ Rectangle {
                         }
                     }
 
+                    // 字号 + 行距 一行搞定
                     Row {
-                        spacing: 4
-                        Repeater {
-                            model: [
-                                {
-                                    t: "小",
-                                    v: 13
-                                },
-                                {
-                                    t: "中",
-                                    v: 15
-                                },
-                                {
-                                    t: "大",
-                                    v: 18
+                        width: parent.width
+                        spacing: 6
+                        Row {
+                            spacing: 3
+                            Repeater {
+                                model: [{t:"小",v:13},{t:"中",v:15},{t:"大",v:18}]
+                                delegate: Rectangle {
+                                    width: 32; height: 20; radius: 3
+                                    color: baseFontSize === modelData.v ? "#2f7dcc" : "#EEEEEE"
+                                    Text { anchors.centerIn: parent; text: modelData.t; font.pixelSize: 9; color: baseFontSize === modelData.v ? "#fff" : "#333"; font.family: "Microsoft YaHei" }
+                                    MouseArea { anchors.fill: parent; onClicked: setFontSize(modelData.v) }
                                 }
-                            ]
-                            delegate: Rectangle {
-                                width: 42
-                                height: 20
-                                radius: 3
-                                color: baseFontSize === modelData.v ? "#2f7dcc" : "#EEEEEE"
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: modelData.t
-                                    font.pixelSize: 10
-                                    color: baseFontSize === modelData.v ? "#fff" : "#333"
-                                    font.family: "Microsoft YaHei"
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: setFontSize(modelData.v)
+                            }
+                        }
+                        Row {
+                            spacing: 3
+                            Repeater {
+                                model: [{t:"紧凑",v:2},{t:"标准",v:4},{t:"宽松",v:6}]
+                                delegate: Rectangle {
+                                    width: 40; height: 20; radius: 3
+                                    color: lineSpacing === modelData.v ? "#2f7dcc" : "#EEEEEE"
+                                    Text { anchors.centerIn: parent; text: modelData.t; font.pixelSize: 9; color: lineSpacing === modelData.v ? "#fff" : "#333"; font.family: "Microsoft YaHei" }
+                                    MouseArea { anchors.fill: parent; onClicked: { lineSpacing = modelData.v; clampCurrentLine(); saveSettings(); } }
                                 }
                             }
                         }
                     }
 
+                    // 主题色
                     Row {
-                        spacing: 4
+                        spacing: 2
                         Repeater {
-                            model: [
-                                {
-                                    t: "紧凑",
-                                    v: 2
-                                },
-                                {
-                                    t: "标准",
-                                    v: 4
-                                },
-                                {
-                                    t: "宽松",
-                                    v: 6
-                                }
-                            ]
+                            model: [{n:"默认",c:"#FFFBF0"},{n:"白色",c:"#FFFFFF"},{n:"黄色",c:"#FFF8E1"},{n:"绿色",c:"#E8F5E9"},{n:"黑色",c:"#263238"},{n:"粉色",c:"#FCE4EC"},{n:"蓝色",c:"#E3F2FD"}]
                             delegate: Rectangle {
-                                width: 56
-                                height: 20
-                                radius: 3
-                                color: lineSpacing === modelData.v ? "#2f7dcc" : "#EEEEEE"
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: modelData.t
-                                    font.pixelSize: 10
-                                    color: lineSpacing === modelData.v ? "#fff" : "#333"
-                                    font.family: "Microsoft YaHei"
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: {
-                                        lineSpacing = modelData.v;
-                                        clampCurrentLine();
-                                        saveSettings();
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    Row {
-                        spacing: 3
-                        Repeater {
-                            model: [
-                                {
-                                    n: "默认",
-                                    c: "#FFFBF0"
-                                },
-                                {
-                                    n: "白色",
-                                    c: "#FFFFFF"
-                                },
-                                {
-                                    n: "黄色",
-                                    c: "#FFF8E1"
-                                },
-                                {
-                                    n: "绿色",
-                                    c: "#E8F5E9"
-                                },
-                                {
-                                    n: "黑色",
-                                    c: "#263238"
-                                },
-                                {
-                                    n: "粉色",
-                                    c: "#FCE4EC"
-                                },
-                                {
-                                    n: "蓝色",
-                                    c: "#E3F2FD"
-                                }
-                            ]
-                            delegate: Rectangle {
-                                width: 28
-                                height: 20
-                                radius: 3
+                                width: 24; height: 18; radius: 3
                                 color: modelData.c
-                                border.color: themeName === modelData.n ? "#2f7dcc" : "#BBBBBB"
+                                border.color: themeName === modelData.n ? "#2f7dcc" : "#CCCCCC"
                                 border.width: themeName === modelData.n ? 2 : 1
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: modelData.n.charAt(0)
-                                    font.pixelSize: 9
-                                    color: modelData.n === "黑色" ? "#ECEFF1" : "#333"
-                                    font.family: "Microsoft YaHei"
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: setTheme(modelData.n)
-                                }
+                                Text { anchors.centerIn: parent; text: modelData.n.charAt(0); font.pixelSize: 8; color: modelData.n === "黑色" ? "#ECEFF1" : "#333"; font.family: "Microsoft YaHei" }
+                                MouseArea { anchors.fill: parent; onClicked: setTheme(modelData.n) }
                             }
                         }
                     }
 
+                    // 功能按钮网格
                     Grid {
                         width: parent.width
                         columns: 3
-                        rowSpacing: 4
-                        columnSpacing: 4
+                        rowSpacing: 3
+                        columnSpacing: 3
 
-                        MenuButton {
-                            label: "返回书架"
-                            w: (menuContent.width - 8) / 3
-                            onClicked: returnToShelf()
-                        }
-                        MenuButton {
-                            label: "跳转"
-                            w: (menuContent.width - 8) / 3
-                            onClicked: openPanel("jump")
-                        }
-                        MenuButton {
-                            label: "书签"
-                            w: (menuContent.width - 8) / 3
-                            onClicked: openPanel("bookmarks")
-                        }
-                        MenuButton {
-                            label: "添加书签"
-                            w: (menuContent.width - 8) / 3
-                            bg: "#E8F5E9"
-                            fg: "#2E7D32"
-                            onClicked: addBookmark()
-                        }
-                        MenuButton {
-                            label: autoScroll ? "停止翻页" : "自动翻页"
-                            w: (menuContent.width - 8) / 3
-                            onClicked: {
-                                if (autoScroll)
-                                    autoScroll = false;
-                                else
-                                    openPanel("auto");
-                            }
-                        }
-                        MenuButton {
-                            label: scrollMode ? "分页模式" : "滚动模式"
-                            w: (menuContent.width - 8) / 3
-                            bg: scrollMode ? "#E8F5E9" : "#FFF3E0"
-                            fg: scrollMode ? "#2E7D32" : "#E65100"
-                            onClicked: {
-                                toggleScrollMode();
-                                closePanels();
-                            }
-                        }
+                        MenuButton { label: "返回书架"; w: (menuContent.width - 6) / 3; onClicked: returnToShelf() }
+                        MenuButton { label: "章节"; w: (menuContent.width - 6) / 3; bg: "#E3F2FD"; fg: "#1565C0"; onClicked: { closePanels(); buildChapterList(); navigateTo("chapterList"); } }
+                        MenuButton { label: "跳转"; w: (menuContent.width - 6) / 3; onClicked: openPanel("jump") }
+                        MenuButton { label: "添加书签"; w: (menuContent.width - 6) / 3; bg: "#E8F5E9"; fg: "#2E7D32"; onClicked: addBookmark() }
+                        MenuButton { label: "书签"; w: (menuContent.width - 6) / 3; onClicked: openPanel("bookmarks") }
+                        MenuButton { label: autoScroll ? "停止翻页" : "自动翻页"; w: (menuContent.width - 6) / 3; onClicked: { if (autoScroll) autoScroll = false; else openPanel("auto"); } }
+                        MenuButton { label: "上一章"; w: (menuContent.width - 6) / 3; bg: "#F5F5F5"; fg: "#333"; onClicked: jumpToChapter(-1) }
+                        MenuButton { label: scrollMode ? "分页" : "滚动"; w: (menuContent.width - 6) / 3; bg: scrollMode ? "#E8F5E9" : "#FFF3E0"; fg: scrollMode ? "#2E7D32" : "#E65100"; onClicked: { toggleScrollMode(); closePanels(); } }
+                        MenuButton { label: "下一章"; w: (menuContent.width - 6) / 3; bg: "#F5F5F5"; fg: "#333"; onClicked: jumpToChapter(1) }
                     }
 
-                    Row {
-                        width: parent.width
-                        spacing: 4
-                        MenuButton {
-                            label: "上一章"
-                            w: (menuContent.width - 4) / 2
-                            bg: "#E3F2FD"
-                            fg: "#1565C0"
-                            onClicked: jumpToChapter(-1)
-                        }
-                        MenuButton {
-                            label: "下一章"
-                            w: (menuContent.width - 4) / 2
-                            bg: "#E3F2FD"
-                            fg: "#1565C0"
-                            onClicked: jumpToChapter(1)
-                        }
-                    }
-
-                    // 底部边距
-                    Item {
-                        width: parent.width
-                        height: 10
-                    }
+                    Item { width: parent.width; height: 6 }
                 }
             }
         }
