@@ -46,6 +46,7 @@ Rectangle {
     property bool animating: false
     property int turnDirection: 0
     property int pendingLine: -1
+    property bool turnIsVertical: false
 
     // ====== 页面管理器 ======
     property var pageStack: ["home"]       // 导航历史栈
@@ -843,6 +844,8 @@ Rectangle {
             pageSlideAnim.stop();
             pageTurnOverlay.visible = false;
             pageTurnOverlay.x = 0;
+            pageTurnOverlay.y = 0;
+            turnIsVertical = false;
             animating = false;
             turnDirection = 0;
             pendingLine = -1;
@@ -1135,17 +1138,24 @@ Rectangle {
         pageTurnText.text = getPageText();
         currentLine = oldLine;
 
-        // 设置覆盖层从右侧滑入
+        // 设置覆盖层滑入方向
         turnDirection = 1;
         turnShadow.anchors.left = turnShadow.parent.left;
         turnShadow.anchors.right = undefined;
         turnShadow.color = Qt.rgba(0, 0, 0, 0);
-        pageTurnOverlay.x = readerPage.width;
+        pageTurnOverlay.x = 0;
+        pageTurnOverlay.y = 0;
         pageTurnOverlay.visible = true;
         animating = true;
         pendingLine = newLine;
 
-        pageSlideAnim.from = readerPage.width;
+        if (turnIsVertical) {
+            pageSlideAnim.property = "y";
+            pageSlideAnim.from = readerPage.height;
+        } else {
+            pageSlideAnim.property = "x";
+            pageSlideAnim.from = readerPage.width;
+        }
         pageSlideAnim.to = 0;
         pageSlideAnim.start();
 
@@ -1170,17 +1180,24 @@ Rectangle {
         pageTurnText.text = getPageText();
         currentLine = oldLine;
 
-        // 设置覆盖层从左侧滑入
+        // 设置覆盖层滑入方向
         turnDirection = -1;
         turnShadow.anchors.left = undefined;
         turnShadow.anchors.right = turnShadow.parent.right;
         turnShadow.color = Qt.rgba(0, 0, 0, 0);
-        pageTurnOverlay.x = -readerPage.width;
+        pageTurnOverlay.x = 0;
+        pageTurnOverlay.y = 0;
         pageTurnOverlay.visible = true;
         animating = true;
         pendingLine = newLine;
 
-        pageSlideAnim.from = -readerPage.width;
+        if (turnIsVertical) {
+            pageSlideAnim.property = "y";
+            pageSlideAnim.from = -readerPage.height;
+        } else {
+            pageSlideAnim.property = "x";
+            pageSlideAnim.from = -readerPage.width;
+        }
         pageSlideAnim.to = 0;
         pageSlideAnim.start();
 
@@ -1835,9 +1852,10 @@ Rectangle {
         // 翻页覆盖层（新页从右侧/左侧滑入覆盖旧页）
         Rectangle {
             id: pageTurnOverlay
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
+            x: 0
+            y: 0
             width: parent.width
+            height: parent.height
             color: bgColor
             visible: false
             z: 5
@@ -1914,6 +1932,8 @@ Rectangle {
                 // 重置覆盖层状态
                 pageTurnOverlay.visible = false;
                 pageTurnOverlay.x = 0;
+                pageTurnOverlay.y = 0;
+                turnIsVertical = false;
                 turnShadow.gradient = null;
                 turnDirection = 0;
                 animating = false;
@@ -1956,16 +1976,13 @@ Rectangle {
                 var dist = Math.sqrt(dx * dx + dy * dy);
 
                 if (moved && dist > 30) {
-                    if (Math.abs(dy) > Math.abs(dx)) {
-                        if (dy < 0)
-                            nextPage();
-                        else
-                            prevPage();
+                    turnIsVertical = Math.abs(dy) > Math.abs(dx);
+                    if (turnIsVertical) {
+                        if (dy < 0) nextPage();
+                        else prevPage();
                     } else {
-                        if (dx < 0)
-                            nextPage();
-                        else
-                            prevPage();
+                        if (dx < 0) nextPage();
+                        else prevPage();
                     }
                     return;
                 }
@@ -2526,14 +2543,14 @@ Rectangle {
                         columnSpacing: 3
 
                         MenuButton { label: "返回书架"; w: (menuContent.width - 6) / 3; onClicked: returnToShelf() }
-                        MenuButton { label: "章节"; w: (menuContent.width - 6) / 3; bg: "#E3F2FD"; fg: "#1565C0"; onClicked: { closePanels(); buildChapterList(); navigateTo("chapterList"); } }
+                        MenuButton { label: "章节"; w: (menuContent.width - 6) / 3; onClicked: { closePanels(); buildChapterList(); navigateTo("chapterList"); } }
                         MenuButton { label: "跳转"; w: (menuContent.width - 6) / 3; onClicked: openPanel("jump") }
-                        MenuButton { label: "添加书签"; w: (menuContent.width - 6) / 3; bg: "#E8F5E9"; fg: "#2E7D32"; onClicked: addBookmark() }
+                        MenuButton { label: "添加书签"; w: (menuContent.width - 6) / 3; onClicked: addBookmark() }
                         MenuButton { label: "书签"; w: (menuContent.width - 6) / 3; onClicked: openPanel("bookmarks") }
                         MenuButton { label: autoScroll ? "停止翻页" : "自动翻页"; w: (menuContent.width - 6) / 3; onClicked: { if (autoScroll) autoScroll = false; else openPanel("auto"); } }
-                        MenuButton { label: "上一章"; w: (menuContent.width - 6) / 3; bg: "#F5F5F5"; fg: "#333"; onClicked: jumpToChapter(-1) }
-                        MenuButton { label: scrollMode ? "分页" : "滚动"; w: (menuContent.width - 6) / 3; bg: scrollMode ? "#E8F5E9" : "#FFF3E0"; fg: scrollMode ? "#2E7D32" : "#E65100"; onClicked: { toggleScrollMode(); closePanels(); } }
-                        MenuButton { label: "下一章"; w: (menuContent.width - 6) / 3; bg: "#F5F5F5"; fg: "#333"; onClicked: jumpToChapter(1) }
+                        MenuButton { label: "上一章"; w: (menuContent.width - 6) / 3; onClicked: jumpToChapter(-1) }
+                        MenuButton { label: scrollMode ? "分页" : "滚动"; w: (menuContent.width - 6) / 3; onClicked: { toggleScrollMode(); closePanels(); } }
+                        MenuButton { label: "下一章"; w: (menuContent.width - 6) / 3; onClicked: jumpToChapter(1) }
                     }
 
                     Item { width: parent.width; height: 6 }
