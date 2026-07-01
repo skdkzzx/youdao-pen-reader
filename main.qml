@@ -437,8 +437,8 @@ Rectangle {
                     }
                 }
             }
-            if (log.indexOf("未找到 python3 或 node") >= 0) {
-                uploaderStatus = "缺少 python3/node";
+            if (log.indexOf("未找到 python3 或 node") >= 0 || log.indexOf("无法启动 HTTP 服务器") >= 0) {
+                uploaderStatus = "缺少 python3/node，且 busybox httpd 不可用";
                 return;
             }
             if (log.indexOf("Address already in use") >= 0 || log.indexOf("EADDRINUSE") >= 0) {

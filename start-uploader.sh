@@ -10,5 +10,5 @@ if command -v node >/dev/null 2>&1; then
     exec node "$PLUGIN_DIR/uploader.js"
 fi
 
-echo "未找到 python3 或 node"
-exit 1
+# built-in shell server — no python3/node needed
+exec /bin/sh "$PLUGIN_DIR/uploader.sh"
