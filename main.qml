@@ -381,8 +381,14 @@ Rectangle {
     }
 
     function openShelf() {
+        // 进书架时强制重扫目录，反映最新的文件状态
+        if (bookFolderModel) {
+            try { bookFolderModel.destroy(); } catch(e) {}
+            bookFolderModel = null;
+            folderScanAvailable = false;
+        }
+        startBookFolderScan();
         navigateTo("shelf");
-        loadBookList();
     }
 
     function closeShelf() {
