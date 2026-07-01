@@ -1638,7 +1638,7 @@ Rectangle {
             color: textColor
             wrapMode: Text.NoWrap
             clip: true
-            visible: !scrollMode && activePanel === ""
+            visible: !scrollMode
         }
 
         // 滚动模式容器（Flickable 上下滚动查看全文）
@@ -1652,7 +1652,7 @@ Rectangle {
             anchors.rightMargin: readerMargin
             anchors.topMargin: readerMargin
             anchors.bottomMargin: readerMargin
-            visible: scrollMode && activePanel === ""
+            visible: scrollMode
             clip: true
             contentWidth: width
             contentHeight: scrollContentCol.height
@@ -1829,7 +1829,7 @@ Rectangle {
             height: 24
             radius: 2
             color: textColor
-            visible: !scrollMode && showNextChapter && currentChapterIdx < chapterBoundaries.length - 1 && activePanel === ""
+            visible: !scrollMode && showNextChapter && currentChapterIdx < chapterBoundaries.length - 1
             z: 30
             Text {
                 anchors.centerIn: parent
