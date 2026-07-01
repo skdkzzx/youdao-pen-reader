@@ -121,6 +121,7 @@ Rectangle {
     property var readingTimeData: ({})    // url -> 累计阅读秒数
     property string lastFilePath: ""
     property var bookFolderModel: null
+    property var bookFolderModelNovels: null  // 扫描 /userdisk/Music/小说/ 子目录
     property bool folderScanAvailable: false
     property var uploaderController: (typeof shellPluginController !== "undefined") ? shellPluginController : null
     property bool uploaderStarted: false
@@ -542,6 +543,24 @@ Rectangle {
 
     function loadBookList() {
         bookList = ReaderUtils.buildBookList(folderScanAvailable, bookFolderModel, progressStore, defaultBookFolder);
+        // 合并小说子目录的扫描结果
+        if (folderScanAvailable && bookFolderModelNovels && bookFolderModelNovels.count > 0) {
+            var novelBooks = ReaderUtils.buildBookList(folderScanAvailable, bookFolderModelNovels, progressStore, defaultBookFolder);
+            var seen = {};
+            for (var i = 0; i < bookList.length; i++)
+                seen[bookList[i].file] = true;
+            for (var j = 0; j < novelBooks.length; j++) {
+                if (!seen[novelBooks[j].file]) {
+                    seen[novelBooks[j].file] = true;
+                    bookList.push(novelBooks[j]);
+                }
+            }
+            bookList.sort(function(a, b) {
+                if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
+                return a.name.localeCompare(b.name);
+            });
+            if (bookList.length > 50) bookList = bookList.slice(0, 50);
+        }
     }
 
     // 书架长按菜单：重命名
@@ -564,8 +583,12 @@ Rectangle {
                 if (bookFolderModel) {
                     try { bookFolderModel.destroy(); } catch(e) {}
                     bookFolderModel = null;
-                    folderScanAvailable = false;
                 }
+                if (bookFolderModelNovels) {
+                    try { bookFolderModelNovels.destroy(); } catch(e) {}
+                    bookFolderModelNovels = null;
+                }
+                folderScanAvailable = false;
                 startBookFolderScan();
                 loadBookList();
             });
@@ -586,8 +609,12 @@ Rectangle {
             if (bookFolderModel) {
                 try { bookFolderModel.destroy(); } catch(e) {}
                 bookFolderModel = null;
-                folderScanAvailable = false;
             }
+            if (bookFolderModelNovels) {
+                try { bookFolderModelNovels.destroy(); } catch(e) {}
+                bookFolderModelNovels = null;
+            }
+            folderScanAvailable = false;
             startBookFolderScan();
             loadBookList();
         });
@@ -607,13 +634,29 @@ Rectangle {
         if (bookFolderModel)
             return;
         try {
-            var qml = "import QtQuick 2.15\n" + "import Qt.labs.folderlistmodel 2.1\n" + "FolderListModel {\n" + "    folder: \"file://" + defaultBookFolder + "\"\n" + "    nameFilters: [\"*.txt\", \"*.TXT\"]\n" + "    showDirs: false\n" + "    showFiles: true\n" + "    showDotAndDotDot: false\n" + "    sortField: FolderListModel.Name\n" + "}\n";
-            bookFolderModel = Qt.createQmlObject(qml, root, "BookFolderModel");
+            // 扫描主目录 /userdisk/Music/（兼容旧文件）
+            var parentUrl = "file://" + encodeURI("/userdisk/Music/");
+            var qml1 = "import QtQuick 2.15\nimport Qt.labs.folderlistmodel 2.1\nFolderListModel {\n" +
+                "    folder: \"" + parentUrl + "\"\n" +
+                "    nameFilters: [\"*.txt\", \"*.TXT\"]\n" +
+                "    showDirs: false\n showFiles: true\n showDotAndDotDot: false\n sortField: FolderListModel.Name\n}";
+            bookFolderModel = Qt.createQmlObject(qml1, root, "BookFolderModel");
             bookFolderModel.countChanged.connect(loadBookList);
+
+            // 扫描子目录 /userdisk/Music/小说/（新文件）
+            var novelsUrl = "file://" + encodeURI("/userdisk/Music/小说/");
+            var qml2 = "import QtQuick 2.15\nimport Qt.labs.folderlistmodel 2.1\nFolderListModel {\n" +
+                "    folder: \"" + novelsUrl + "\"\n" +
+                "    nameFilters: [\"*.txt\", \"*.TXT\"]\n" +
+                "    showDirs: false\n showFiles: true\n showDotAndDotDot: false\n sortField: FolderListModel.Name\n}";
+            bookFolderModelNovels = Qt.createQmlObject(qml2, root, "BookFolderModelNovels");
+            bookFolderModelNovels.countChanged.connect(loadBookList);
+
             folderScanAvailable = true;
             loadBookList();
         } catch (e) {
             bookFolderModel = null;
+            bookFolderModelNovels = null;
             folderScanAvailable = false;
         }
     }
@@ -2782,8 +2825,12 @@ Rectangle {
                                 if (bookFolderModel) {
                                     try { bookFolderModel.destroy(); } catch(e) {}
                                     bookFolderModel = null;
-                                    folderScanAvailable = false;
                                 }
+                                if (bookFolderModelNovels) {
+                                    try { bookFolderModelNovels.destroy(); } catch(e) {}
+                                    bookFolderModelNovels = null;
+                                }
+                                folderScanAvailable = false;
                                 startBookFolderScan();
                                 loadBookList();
                                 showToast("迁移完成");
