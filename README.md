@@ -1,6 +1,6 @@
-# 电子书阅读器 v6.1.0
+# 电子书阅读器 v6.5.0
 
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[许可证: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)(https://www.gnu.org/licenses/gpl-3.0)
 
 一款专为词典笔设计的小说阅读器插件，支持本地 `.txt` 小说阅读，并提供局域网网页上传功能，让你轻松在词典笔上看小说。
 
@@ -14,23 +14,44 @@
 - "我的书架"独立页面，显示所有已扫描和已阅读的小说
 - 支持手动输入书名打开小说（无需输入完整路径）
 - 自动记录每本小说的阅读进度，下次打开自动恢复
+- **逐章加载**：每次只加载当前章节，进入阅读器极速打开
+- **章节导航**：滚动模式下章节顶部"上一章"、底部"下一章"按钮，分页模式章尾"下一章"按钮
 - 支持书签功能，可添加、查看、删除书签
 - 支持章节识别与跳转（自动识别"第X章"等中文章节格式）
+- **书架进度**：显示整本书总阅读进度
+- **菜单进度**：显示当前章节阅读进度
 
 ### 阅读设置
 
-- 三种字号可选：小（13px）、中（15px）、大（18px）
+- 三种字号可选：小（13px）、中（15px）、大（18px），**默认中号**
 - 三种行距模式：紧凑、标准、宽松
 - 七种阅读主题：默认、白色、黄色、绿色、黑色、粉色、蓝色
-- 支持自动翻页，可自定义间隔秒数（1~999秒）
+- 支持自动翻页，可自定义间隔秒数（1~999 秒）
+
+### 两种阅读模式
+
+#### 分页模式（默认）
+- 适合专注阅读，一页一页翻
+- 点击/滑动翻页
+- 章末自动显示"下一章 →"按钮
+- 再次点击右区域或按钮加载下一章
+
+#### 滚动模式
+- 适合快速浏览，上下滑动滚动查看全文
+- 章节顶部显示"← 上一章"按钮
+- 章节底部显示"下一章 →"按钮
+- 右下角 ☰ 按钮打开菜单
+- 可随时在菜单中切换滚动/分页模式（切换后自动保存位置）
 
 ### 交互操作
 
-- 点击屏幕左 1/3 区域：上一页
-- 点击屏幕右 1/3 区域：下一页
+- 点击屏幕左 1/3 区域：上一页（分页模式）/ 上翻一屏（滚动模式）
+- 点击屏幕右 1/3 区域：下一页（分页模式）/ 下翻一屏（滚动模式）
 - 点击屏幕中间 1/3 区域：打开菜单
 - 滑动操作：上/下/左/右滑动均可翻页
+- 长按屏幕：返回首页（分页、滚动模式均支持）
 - 菜单面板：进度条拖拽跳转、百分比快速跳转、页码跳转、章节列表跳转
+- **☰ 浮动菜单按钮**：滚动模式右下角显示，点击打开菜单
 
 ### 内置教程
 
@@ -38,62 +59,226 @@
 - 教程内容涵盖小说存放、上传方式、阅读操作、菜单功能、常见问题等
 - 阅读教程的操作与阅读小说一致（点击/滑动翻页）
 
-### 赞赏支持
+### Toast 提示
 
-- 首页书架下方有"赞赏作者"按钮，点击可查看赞赏二维码
-- 首次安装打开应用会自动弹出赞赏弹窗
-- 之后进入应用不再自动弹出，但可随时手动点击按钮查看
+- 底部弹出式黑色圆角提示，2 秒自动消失
+- 书签添加成功、模式切换等操作均有 Toast 反馈
 
 ### 局域网上传
 
-- 内置 HTTP 上传服务器（端口 8088）
-- 支持 Python3 和 Node.js 两种运行时（自动检测）
-- 手机/电脑浏览器打开即用，无需安装额外 App
-- 上传的文件自动保存到 `/userdisk/Music/` 目录
-- 文件名自动清理特殊字符，确保兼容性
+- - 内置 HTTP 上传服务器（端口 8088）
+- - 支持 Python3 和 Node.js 两种运行时（自动检测）
+- - 手机/电脑浏览器打开即用，无需安装额外 App
+- - 上传的文件自动保存到 `/userdisk/Music/` 目录
+- - 文件名自动清理特殊字符，确保兼容性
 
 ## 文件结构
 
 ```
 novel-reader/
-├── main.qml            # 主界面 QML 文件（阅读器核心逻辑与 UI）
-├── MenuButton.qml      # 菜单按钮组件
-├── metadata.json       # 插件元数据（ID、版本、作者等）
-├── libshell_plugin.so  # Shell 插件原生库（用于启动上传服务）
-├── start-uploader.sh   # 上传服务启动脚本（自动检测 python3/node）
-├── uploader.py         # Python 版上传 HTTP 服务器
-├── uploader.js         # Node.js 版上传 HTTP 服务器
-├── Thanks.PNG          # 赞赏二维码图片
-├── LICENSE             # GPL v3 开源协议
-└── README.md           # 说明文档
+├── main.qml              # 主界面 QML 文件（阅读器核心逻辑与 UI）
+├── ReaderUtils.js        # 阅读器工具函数（换行、章节扫描、书架列表等）
+├── Storage.js            # JSON 文件持久化存储
+├── MenuButton.qml        # 菜单按钮组件
+├── SponsorDialog.qml     # 赞赏弹窗组件
+├── TutorialPage.qml      # 使用教程页面
+├── metadata.json         # 插件元数据（ID、版本、作者等）
+├── libshell_plugin.so    # Shell 插件原生库（用于启动上传服务）
+├── start-uploader.sh     # 上传服务启动脚本（自动检测 python3/node）
+├── uploader.py           # Python 版上传 HTTP 服务器
+├── uploader.js           # Node.js 版上传 HTTP 服务器
+├── Thanks.PNG            # 爱发电赞赏二维码
+├── weixin.png            # 微信赞赏二维码
+├── icon.png              # 应用图标
+├── LICENSE               # GPL v3 开源协议
+└── README.md             # 说明文档
 ```
 
 ## 适用环境
 
-- 已安装或使用 PenMods 修改过后的词典笔系统
+- 已安装或使用 PenMods 修改过的词典笔系统
 - 插件系统支持 QML 插件加载
 - 如需使用局域网上传功能，词典笔系统内需要有 `python3` 或 `node`
-- 词典笔和手机/电脑需要连接到同一个局域网 Wi-Fi
+- 词典笔和手机/电脑需连接至同一局域网 Wi-Fi
 
 ## 安装方式
+### 安装`python3` 和 `node`
 
-### 方式一：通过 PenMods 插件目录安装
+## 1. 前置准备
 
-将整个 `novel-reader` 文件夹放到 PenMods 的插件目录下：
+### 1.1 PC 端
+
+- ADB 已安装并能连接设备
+- 网络可访问以下站点：
+  - `https://nodejs.org`（Node.js 官方下载）
+  - `https://github.com`（Python 预编译包）
+
+### 1.2 设备端
+#### 确认设备连接
+adb devices
+#### 输出示例:
+#### List of devices attached
+#### 2CA0000000000    device
+
+## 2. 下载预编译包
+
+### 2.1 Python 3 (python-build-standalone)
+
+> **来源**: [astral-sh/python-build-standalone](https://github.com/astral-sh/python-build-standalone)
+>
+
+前往 [Releases 页面](https://github.com/astral-sh/python-build-standalone/releases)，找到最新版本（如 `20260610`）。
+
+下载对应的 **aarch64 install_only** 包：
+
+| Python 版本 | 下载文件名 |
+|-------------|-----------|
+| **3.11** | `cpython-3.11.XX+YYYYMMDD-aarch64-unknown-linux-gnu-install_only.tar.gz` |
+
+
+> ⚠️ 务必选择 `install_only` 版本，体积更小；`aarch64-unknown-linux-gnu` 对应 glibc 版本。
+
+### 2.2 Node.js
+
+> **来源**: [nodejs.org](https://nodejs.org)
+>
+> **⚠️ 重要**：Node.js v18 起要求 **glibc ≥ 2.28**，而本设备只有 **glibc 2.27**。因此必须使用 **Node.js v16 LTS**！
+
+直接下载 Node.js v16.20.2 ARM64 版：
+
+```bash
+# 命令行下载 (Windows/Linux/macOS)
+curl -L -o node-v16.20.2-linux-arm64.tar.xz \
+  "https://nodejs.org/dist/v16.20.2/node-v16.20.2-linux-arm64.tar.xz"
+```
+
+或浏览器访问：https://nodejs.org/dist/v16.20.2/node-v16.20.2-linux-arm64.tar.xz
+
+### 2.3 确认文件
+
+下载完成后，两个文件名如下：
+
+```
+cpython-3.11.15+20260610-aarch64-unknown-linux-gnu-install_only.tar.gz  (~49 MB)
+node-v16.20.2-linux-arm64.tar.xz                                         (~22 MB)
+```
+
+---
+
+## 3. 推送到设备
+
+```bash
+# 推送 Python
+adb push cpython-3.11.15+20260610-aarch64-unknown-linux-gnu-install_only.tar.gz \
+  /userdisk/PenMods/plugins/novel-reader/
+
+# 推送 Node.js
+adb push node-v16.20.2-linux-arm64.tar.xz \
+  /userdisk/PenMods/plugins/novel-reader/
+
+# 确认文件已推送
+adb shell ls -la /userdisk/PenMods/plugins/novel-reader/*.tar.*
+```
+
+---
+
+## 4. 解压安装
+
+### 4.1 Python（tar.gz 格式）
+
+```bash
+adb shell
+
+# 进入目标目录
+cd /userdisk/PenMods/plugins/novel-reader
+
+# 解压 (BusyBox tar 支持 -z 即 gzip)
+tar -xzf cpython-*.tar.gz
+
+# 验证
+./python/bin/python3 --version
+# 输出: Python 3.11.15
+```
+
+### 4.2 Node.js（tar.xz 格式）
+
+BusyBox 的 tar 不支持 `-J`（xz），需要两步：
+
+```bash
+# 第一步: 先解 xz 压缩
+unxz node-v16.20.2-linux-arm64.tar.xz
+# 得到 node-v16.20.2-linux-arm64.tar
+
+# 第二步: 解 tar 包
+tar -xf node-v16.20.2-linux-arm64.tar
+
+# 验证
+./node-v16.20.2-linux-arm64/bin/node --version
+# 输出: v16.20.2
+```
+
+### 4.3 清理安装包
+
+```bash
+# 删除压缩包，释放空间
+rm -f cpython-*.tar.gz node-*.tar.xz node-*.tar
+```
+
+---
+
+## 5. 全局配置
+
+将 Python 和 Node.js 链接到系统 PATH 中：
+
+```bash
+# 创建软链接
+ln -sf /userdisk/PenMods/plugins/novel-reader/python/bin/python3 /usr/bin/python3
+ln -sf /userdisk/PenMods/plugins/novel-reader/python/bin/python3 /usr/bin/python
+ln -sf /userdisk/PenMods/plugins/novel-reader/node-v16.20.2-linux-arm64/bin/node   /usr/bin/node
+ln -sf /userdisk/PenMods/plugins/novel-reader/node-v16.20.2-linux-arm64/bin/npm    /usr/bin/npm
+
+# 退出 adb shell
+exit
+```
+
+
+
+---
+
+## 6. 验证安装
+
+```bash
+# 全局验证（从任意目录）
+adb shell python3 --version
+adb shell node --version
+adb shell npm --version
+
+# 预期输出:
+# Python 3.11.15
+# v16.20.2
+# 8.19.4
+```
+
+```bash
+# 验证 command -v 能找到
+adb shell "command -v python3 && command -v node && command -v npm"
+
+# 预期输出:
+# /usr/bin/python3
+# /usr/bin/node
+# /usr/bin/npm
+```
+### 安装插件
+通过 PenMods 插件目录安装
+
+将整个 `novel-reader` 文件夹复制到 PenMods 的插件目录下：
 
 ```
 /userdisk/PenMods/plugins/novel-reader/
 ```
 
-### 方式二：通过扩展目录安装
+安装完成后，在插件管理中即可打开
 
-也可以放到扩展目录：
-
-```
-/userdisk/youdaoExt/ext/novel-reader/
-```
-
-安装完成后，重启词典笔或重新加载插件列表即可看到"电子书阅读器"。
 
 ## 小说默认目录
 
@@ -169,7 +354,7 @@ http://192.168.1.23:8088
 
 #### 查看词典笔 IP
 
-一般可以在词典笔的 Wi-Fi 设置里查看当前连接网络的 IP 地址。常见格式类似：
+通常可以在词典笔的 Wi-Fi 设置中查看当前连接网络的 IP 地址。常见的格式类似于：
 
 ```
 192.168.1.23
@@ -267,7 +452,7 @@ http://192.168.1.23:8088
 - 输入百分比：精确跳转到指定百分比位置
 - 章节列表：自动识别小说中的章节标题，点击即可跳转
 
-## 技术说明
+##技术说明
 
 ### 技术栈
 
@@ -295,15 +480,15 @@ http://192.168.1.23:8088
 
 ### 数据存储
 
-阅读器使用 Qt LocalStorage（SQLite）存储以下数据：
+阅读器使用 JSON 文件持久化存储以下数据（双备份防损坏）：
 
-- **阅读进度**：每本小说的当前行号、总行数、最后阅读时间
-- **阅读设置**：字号、行距、主题颜色、自动翻页间隔
-- **书签数据**：每本小说的书签列表
+- **阅读进度**：每本小说的当前章节、章节内行号、整本书进度百分比、最后阅读时间
+- **阅读设置**：字号、行距、主题颜色、自动翻页间隔、滚动/分页模式
+- **书签数据**：每本小说的书签列表（含所属章节索引）
 
-数据库名称：`NovelReaderStateV2`
+存储位置：`/userdisk/.novel-reader-state.json`（主）及 `/userdisk/PenMods/plugins/novel-reader/.state-backup.json`（备份）
 
-### 章节识别
+### 章节识别与逐章加载
 
 阅读器自动识别以下格式的章节标题：
 
@@ -311,6 +496,14 @@ http://192.168.1.23:8088
 - 英文章节：Chapter X、CHAPTER X
 
 章节标题长度限制：1~50 字符。
+
+**逐章加载机制**：打开文件时只扫描章节边界（纯文本扫描，极快），仅加载当前章节内容进行换行处理。阅读到章节末尾时自动加载下一章。切换章节时保存当前章节进度，下次打开自动定位。
+
+### 阅读模式
+
+**分页模式**（默认）：传统翻页阅读，点击/滑动翻页，章末显示「下一章 →」按钮。
+
+**滚动模式**：上下滑动滚动查看全文，章节顶部「← 上一章」按钮，底部「下一章 →」按钮。可在菜单中随时切换。切换后自动保存阅读位置。
 
 ### 屏幕适配
 
@@ -376,9 +569,9 @@ http://192.168.1.23:8088
 
 ### 阅读进度丢失
 
-- 阅读进度保存在本地 SQLite 数据库中
+- 阅读进度保存在本地 JSON 文件中（`/userdisk/.novel-reader-state.json`，双备份）
 - 如果卸载插件或清除应用数据，进度会丢失
-- 删除小说文件不会自动清除对应的进度记录（可通过"删除记录"手动清除）
+- 删除小说文件不会自动清除对应的进度记录
 
 ### 自动翻页太快/太慢
 
@@ -395,9 +588,31 @@ http://192.168.1.23:8088
 ## 版本信息
 
 - **插件 ID**：`com.reader.novel`
-- **当前版本**：6.1.0
+- **当前版本**：6.5.0
 - **作者**：skdkzzx
 - **基于**：PenMods 插件环境
+
+## 更新日志 (v6.5.0)
+
+### 新增功能
+- **逐章加载**：每次只加载当前章节，大幅提升打开速度，告别大文件卡顿
+- **滚动模式**：新增上下滚动阅读模式，可在菜单中随时切换滚动/分页
+- **章节导航按钮**：滚动模式下章节顶部「← 上一章」、底部「下一章 →」按钮；分页模式章尾「下一章 →」按钮
+- **Toast 提示系统**：底部弹出式圆角提示，书签添加、模式切换等操作有反馈
+- **右下角菜单按钮**：滚动模式下显示 ☰ 浮动按钮，快速打开菜单
+- **整本书进度**：书架显示总阅读进度，菜单内显示当前章节进度
+
+### 体验优化
+- 默认字号改为 15px（中号）
+- 所有按钮适配 7 种阅读主题色
+- 首次进入自动定位到上次阅读章节
+- 分页模式双击右区域快速加载下一章（先显示按钮，再点加载）
+- 书签已添加改为 Toast 提示
+
+### 技术改进
+- 移除旧版分块加载代码，改用按章加载架构
+- 存储改用 JSON 文件持久化（双备份防丢失）
+- 工具函数与存储逻辑模块化到独立 JS 文件
 
 ## 许可证
 
