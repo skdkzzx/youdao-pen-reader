@@ -2746,7 +2746,6 @@ Rectangle {
                     Text { anchors.centerIn: parent; text: "x"; font.pixelSize: 11; color: "#333"; font.family: "Microsoft YaHei" }
                     MouseArea { anchors.fill: parent; onClicked: closePanels() }
                 }
-                    onClicked: closePanels()
                 }
             }
 
@@ -2849,7 +2848,6 @@ Rectangle {
                 }
             }
         }
-    }
 
     Rectangle {
         id: autoPanel
@@ -2926,25 +2924,6 @@ Rectangle {
                         }
                     }
 
-                    Row {
-                        spacing: 8
-                        MenuButton {
-                    label: "输入秒数"
-                    w: 86
-                    h: 24
-                    bg: "#E3F2FD"
-                    fg: "#1565C0"
-                    onClicked: {
-                        activePanel = "";
-                        showKeyboard(String(autoScrollSeconds), function (text) {
-                            autoScrollSeconds = normalizeAutoScrollSeconds(text);
-                            saveSettings();
-                            openPanel("auto");
-                        });
-                    }
-                }
-            }
-
             Row {
                 anchors.horizontalCenter: parent.horizontalCenter
                 spacing: 8
@@ -2970,7 +2949,10 @@ Rectangle {
     }
 
 
-    // ====== 书架长按菜单 ======
+    }
+    }
+
+    // ====== shelf menu ======
     Rectangle {
         id: shelfMenuPanel
         visible: showShelfMenu
