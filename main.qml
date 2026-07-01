@@ -146,7 +146,7 @@ Rectangle {
     property string toastMessage: ""
     property bool showNextChapter: false   // 是否显示"下一章"按钮
 
-    readonly property string defaultBookFolder: "/userdisk/Novels/"
+    readonly property string defaultBookFolder: "/userdisk/Music/小说/"
     readonly property string defaultBookSuffix: ".txt"
     readonly property int readerMargin: 7
 
