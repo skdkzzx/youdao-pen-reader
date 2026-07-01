@@ -830,9 +830,20 @@ Rectangle {
 
     function closePanels() {
         activePanel = "";
+        // 恢复阅读器文本显示（大文件时菜单/面板覆盖不卡顿）
+        if (pageMode === "reader") {
+            contentText.visible = !scrollMode;
+            scrollFlickable.visible = scrollMode;
+            pageNextBtn.visible = !scrollMode && showNextChapter && currentChapterIdx < chapterBoundaries.length - 1;
+        }
     }
 
     function openPanel(name) {
+        if (pageMode === "reader") {
+            // 打开面板时隐藏阅读器文本，避免大文件卡顿
+            contentText.visible = false;
+            scrollFlickable.visible = false;
+        }
         if (name === "bookmarks")
             loadBookmarkList();
         activePanel = name;
