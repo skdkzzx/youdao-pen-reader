@@ -111,6 +111,8 @@ Rectangle {
             return readerPage;
         if (mode === "settings")
             return settingsPage;
+        if (mode === "chapterList")
+            return chapterListPage;
         return null;
     }
 
@@ -148,6 +150,11 @@ Rectangle {
     property bool scrollMode: false
     property real scrollOffset: 0
     property real scrollMax: 0
+
+    // ====== 章节列表设置 ======
+    property string chapterNameMode: "scroll"  // "scroll" 滚动显示 或 "short" 仅显示第X章
+    property string chapterSearchQuery: ""      // 章节搜索关键字
+    property var filteredChapterList: []        // 过滤后的章节列表
 
     // ====== 手势设置 ======
     property bool tripleTapHome: false    // 三击返回首页
@@ -522,7 +529,8 @@ Rectangle {
             lastFile: lastFilePath,
             autoScrollSeconds: autoScrollSeconds,
             scrollMode: scrollMode,
-            tripleTapHome: tripleTapHome
+            tripleTapHome: tripleTapHome,
+            chapterNameMode: chapterNameMode
         };
         Storage.saveSettingsToStore(settings);
     }
@@ -545,6 +553,7 @@ Rectangle {
             autoScrollSeconds = 2;
         }
         tripleTapHome = settings.tripleTapHome === true;
+        chapterNameMode = settings.chapterNameMode || "scroll";
         charsPerLine = ReaderUtils.updateCharsPerLine(baseFontSize);
     }
 
@@ -667,7 +676,7 @@ Rectangle {
         bookmarksStore[currentUrl] = items;
         if (writeState("bookmarks", JSON.stringify(bookmarksStore))) {
             loadBookmarkList();
-            showToast("✓ 已添加书签");
+            showToast("已添加书签");
         } else {
             statusMessage = "添加书签失败";
             messageTimer.restart();
@@ -1043,6 +1052,34 @@ Rectangle {
         }
     }
 
+    function buildChapterList() {
+        chapterSearchQuery = "";
+        filterChapterList();
+    }
+
+    function filterChapterList() {
+        var q = chapterSearchQuery.trim().toLowerCase();
+        if (q === "") {
+            filteredChapterList = chapterList;
+            return;
+        }
+        var result = [];
+        for (var i = 0; i < chapterList.length; i++) {
+            if (chapterList[i].title.toLowerCase().indexOf(q) >= 0)
+                result.push(chapterList[i]);
+        }
+        filteredChapterList = result;
+    }
+
+    function formatChapterTitle(title) {
+        if (chapterNameMode === "short") {
+            // 提取"第X章"部分
+            var m = title.match(/(第[^章节回集卷部篇]+[章节回集卷部篇])/);
+            return m ? m[1] : title;
+        }
+        return title; // scroll 模式由 Text 的 elide 处理
+    }
+
     function processContent(content) {
         try {
             rawLines = ReaderUtils.splitIntoLines(content);
@@ -1390,7 +1427,7 @@ Rectangle {
                     border.color: "#FFCC80"
                     Text {
                         anchors.centerIn: parent
-                        text: "☕ 赞赏作者"
+                        text: "赞赏作者"
                         font.pixelSize: 12
                         color: "#E65100"
                         font.family: "Microsoft YaHei"
@@ -1751,7 +1788,7 @@ Rectangle {
 
             Text {
                 anchors.centerIn: parent
-                text: "☰"
+                text: "菜单"
                 font.pixelSize: 16
                 color: "#FFFFFF"
                 font.family: "Microsoft YaHei"
@@ -2109,7 +2146,244 @@ Rectangle {
                         }
                     }
 
+                    // 章节名显示模式
+                    Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
+
+                    Text {
+                        text: "章节名显示"
+                        font.pixelSize: 11
+                        font.bold: true
+                        color: textColor
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Row {
+                        width: parent.width
+                        spacing: 6
+
+                        Rectangle {
+                            width: (parent.width - 6) / 2
+                            height: 24
+                            radius: 3
+                            color: chapterNameMode === "scroll" ? "#2f7dcc" : "#EEEEEE"
+                            Text {
+                                anchors.centerIn: parent
+                                text: "滚动显示"
+                                font.pixelSize: 10
+                                color: chapterNameMode === "scroll" ? "#fff" : "#333"
+                                font.family: "Microsoft YaHei"
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: {
+                                    chapterNameMode = "scroll";
+                                    saveSettings();
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            width: (parent.width - 6) / 2
+                            height: 24
+                            radius: 3
+                            color: chapterNameMode === "short" ? "#2f7dcc" : "#EEEEEE"
+                            Text {
+                                anchors.centerIn: parent
+                                text: "仅显示第X章"
+                                font.pixelSize: 10
+                                color: chapterNameMode === "short" ? "#fff" : "#333"
+                                font.family: "Microsoft YaHei"
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: {
+                                    chapterNameMode = "short";
+                                    saveSettings();
+                                }
+                            }
+                        }
+                    }
+
                     Item { width: parent.width; height: 8 }
+                }
+            }
+        }
+    }
+
+    // ====== 章节列表全屏页面 ======
+    Rectangle {
+        id: chapterListPage
+        anchors.fill: parent
+        visible: pageMode === "chapterList"
+        color: bgColor
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 6
+            spacing: 4
+
+            Row {
+                width: parent.width
+                height: 24
+                spacing: 6
+
+                Rectangle {
+                    width: 50
+                    height: 24
+                    radius: 4
+                    color: "#DDDDDD"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "返回"
+                        font.pixelSize: 11
+                        color: "#333333"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: navigateBack()
+                    }
+                }
+
+                Text {
+                    width: parent.width - 102
+                    height: 24
+                    text: "章节 (" + filteredChapterList.length + ")"
+                    font.pixelSize: 13
+                    font.bold: true
+                    color: textColor
+                    verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignHCenter
+                    elide: Text.ElideRight
+                    font.family: "Microsoft YaHei"
+                }
+
+                Rectangle {
+                    width: 40
+                    height: 24
+                    radius: 4
+                    color: chapterSearchQuery !== "" ? "#FFEBEE" : "#E3F2FD"
+                    border.color: chapterSearchQuery !== "" ? "#EF9A9A" : "#BBDEFB"
+                    Text {
+                        anchors.centerIn: parent
+                        text: chapterSearchQuery !== "" ? "x" : "搜"
+                        font.pixelSize: 11
+                        color: chapterSearchQuery !== "" ? "#D32F2F" : "#1565C0"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            if (chapterSearchQuery !== "") {
+                                chapterSearchQuery = "";
+                                filterChapterList();
+                            } else {
+                                showKeyboard("", function(text) {
+                                    if (text !== undefined) {
+                                        chapterSearchQuery = text || "";
+                                        filterChapterList();
+                                    }
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
+            Flickable {
+                width: parent.width
+                height: parent.height - 28
+                contentWidth: width
+                contentHeight: chapterGrid.height
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
+                Column {
+                    id: chapterGrid
+                    width: parent.width
+                    spacing: 3
+
+                    // 2列布局：每行放2个章节
+                    Repeater {
+                        model: Math.ceil(filteredChapterList.length / 2)
+
+                        delegate: Row {
+                            width: parent.width
+                            spacing: 4
+
+                            // 左列
+                            Rectangle {
+                                width: (parent.width - 4) / 2
+                                height: 26
+                                radius: 3
+                                color: (filteredChapterList[index * 2] && filteredChapterList[index * 2].lineIndex === currentChapterIdx) ? "#E3F2FD" : "#F5F0E8"
+                                visible: filteredChapterList.length > index * 2
+                                clip: true
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 6
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: filteredChapterList.length > index * 2 ? formatChapterTitle(filteredChapterList[index * 2].title) : ""
+                                    font.pixelSize: 10
+                                    color: filteredChapterList.length > index * 2 && filteredChapterList[index * 2].lineIndex === currentChapterIdx ? "#1565C0" : "#333"
+                                    width: parent.width - 8
+                                    elide: chapterNameMode === "scroll" ? Text.ElideRight : Text.ElideRight
+                                    font.family: "Microsoft YaHei"
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        if (filteredChapterList.length > index * 2) {
+                                            var idx = filteredChapterList[index * 2].lineIndex;
+                                            if (idx !== currentChapterIdx) {
+                                                saveProgress();
+                                                loadChapter(idx);
+                                            }
+                                            navigateBack();
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 右列
+                            Rectangle {
+                                width: (parent.width - 4) / 2
+                                height: 26
+                                radius: 3
+                                color: (filteredChapterList.length > index * 2 + 1 && filteredChapterList[index * 2 + 1].lineIndex === currentChapterIdx) ? "#E3F2FD" : "#F5F0E8"
+                                visible: filteredChapterList.length > index * 2 + 1
+                                clip: true
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 6
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: filteredChapterList.length > index * 2 + 1 ? formatChapterTitle(filteredChapterList[index * 2 + 1].title) : ""
+                                    font.pixelSize: 10
+                                    color: filteredChapterList.length > index * 2 + 1 && filteredChapterList[index * 2 + 1].lineIndex === currentChapterIdx ? "#1565C0" : "#333"
+                                    width: parent.width - 8
+                                    elide: Text.ElideRight
+                                    font.family: "Microsoft YaHei"
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        if (filteredChapterList.length > index * 2 + 1) {
+                                            var idx = filteredChapterList[index * 2 + 1].lineIndex;
+                                            if (idx !== currentChapterIdx) {
+                                                saveProgress();
+                                                loadChapter(idx);
+                                            }
+                                            navigateBack();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2117,38 +2391,21 @@ Rectangle {
 
     Rectangle {
         id: menuPanel
-        visible: activePanel === "menu" || menuPanel.opacity > 0.01
-        opacity: activePanel === "menu" ? 1 : 0
-        scale: 1
+        visible: activePanel === "menu"
         anchors.fill: parent
-        anchors.margins: 8
-        radius: 6
-        color: bgColor === "#263238" ? "#37474F" : "#FFFFFF"
-        border.color: "#CCCCCC"
+        color: bgColor
         z: 40
-        Behavior on opacity {
-            NumberAnimation {
-                duration: 180
-                easing.type: Easing.OutCubic
-            }
-        }
-        Behavior on scale {
-            NumberAnimation {
-                duration: 180
-                easing.type: Easing.OutBack
-            }
-        }
 
         Column {
             anchors.fill: parent
-            anchors.margins: 8
+            anchors.margins: 6
             spacing: 5
 
             Row {
                 width: parent.width
                 height: 24
                 Text {
-                    width: parent.width - 30
+                    width: parent.width - 52
                     text: fileName
                     font.pixelSize: 12
                     font.bold: true
@@ -2158,15 +2415,15 @@ Rectangle {
                     font.family: "Microsoft YaHei"
                 }
                 Rectangle {
-                    width: 24
+                    width: 40
                     height: 24
-                    radius: 12
+                    radius: 4
                     color: "#DDDDDD"
                     Text {
                         anchors.centerIn: parent
-                        text: "x"
-                        font.pixelSize: 12
-                        color: "#333"
+                        text: "关闭"
+                        font.pixelSize: 10
+                        color: "#333333"
                         font.family: "Microsoft YaHei"
                     }
                     MouseArea {
@@ -2359,9 +2616,13 @@ Rectangle {
                             onClicked: returnToShelf()
                         }
                         MenuButton {
-                            label: "跳转"
+                            label: "章节"
                             w: (menuContent.width - 8) / 3
-                            onClicked: openPanel("jump")
+                            onClicked: {
+                                closePanels();
+                                buildChapterList();
+                                navigateTo("chapterList");
+                            }
                         }
                         MenuButton {
                             label: "书签"
@@ -2386,7 +2647,7 @@ Rectangle {
                             }
                         }
                         MenuButton {
-                            label: scrollMode ? "📖分页" : "📜滚动"
+                            label: scrollMode ? "分页模式" : "滚动模式"
                             w: (menuContent.width - 8) / 3
                             bg: scrollMode ? "#E8F5E9" : "#FFF3E0"
                             fg: scrollMode ? "#2E7D32" : "#E65100"
@@ -2421,178 +2682,6 @@ Rectangle {
                         width: parent.width
                         height: 10
                     }
-                }
-            }
-        }
-    }
-
-    Rectangle {
-        id: jumpPanel
-        visible: activePanel === "jump" || jumpPanel.opacity > 0.01
-        opacity: activePanel === "jump" ? 1 : 0
-        scale: 1
-        anchors.fill: parent
-        anchors.margins: 10
-        radius: 6
-        color: bgColor === "#263238" ? "#37474F" : "#FFFFFF"
-        border.color: "#CCCCCC"
-        z: 50
-        Behavior on opacity {
-            NumberAnimation {
-                duration: 180
-                easing.type: Easing.OutCubic
-            }
-        }
-        Behavior on scale {
-            NumberAnimation {
-                duration: 180
-                easing.type: Easing.OutBack
-            }
-        }
-
-        Column {
-            anchors.fill: parent
-            anchors.margins: 8
-            spacing: 6
-
-            Row {
-                width: parent.width
-                height: 24
-                Text {
-                    width: parent.width - 30
-                    text: "跳转到"
-                    font.pixelSize: 12
-                    font.bold: true
-                    color: textColor
-                    verticalAlignment: Text.AlignVCenter
-                    font.family: "Microsoft YaHei"
-                }
-                MenuButton {
-                    label: "x"
-                    w: 24
-                    h: 24
-                    onClicked: closePanels()
-                }
-            }
-
-            Text {
-                width: parent.width
-                text: "第" + getCurrentPage() + "页 / 共" + getTotalPages() + "页 (" + getProgressPercent() + "%)"
-                font.pixelSize: 10
-                color: textColor
-                font.family: "Microsoft YaHei"
-            }
-
-            Row {
-                spacing: 4
-                Repeater {
-                    model: [
-                        {
-                            t: "0%",
-                            v: 0
-                        },
-                        {
-                            t: "25%",
-                            v: 25
-                        },
-                        {
-                            t: "50%",
-                            v: 50
-                        },
-                        {
-                            t: "75%",
-                            v: 75
-                        },
-                        {
-                            t: "100%",
-                            v: 100
-                        }
-                    ]
-                    delegate: MenuButton {
-                        label: modelData.t
-                        w: 42
-                        h: 21
-                        bg: "#2f7dcc"
-                        fg: "#fff"
-                        onClicked: {
-                            jumpToPercent(modelData.v);
-                            closePanels();
-                        }
-                    }
-                }
-            }
-
-            ListView {
-                width: parent.width
-                height: 44
-                clip: true
-                spacing: 2
-                visible: chapterList.length > 0
-                model: chapterList
-
-                delegate: Rectangle {
-                    width: parent.width
-                    height: 20
-                    radius: 2
-                    color: chapterMouse.pressed ? "#E0D8C8" : "#F5F0E8"
-                    Text {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 4
-                        anchors.verticalCenter: parent.verticalCenter
-                        text: modelData.title
-                        font.pixelSize: 10
-                        color: "#333"
-                        elide: Text.ElideRight
-                        width: parent.width - 8
-                        font.family: "Microsoft YaHei"
-                    }
-                    MouseArea {
-                        id: chapterMouse
-                        anchors.fill: parent
-                        onClicked: {
-                            if (modelData.lineIndex !== currentChapterIdx) {
-                                saveProgress();
-                                loadChapter(modelData.lineIndex);
-                            }
-                            closePanels();
-                        }
-                    }
-                }
-            }
-
-            Row {
-                spacing: 6
-                MenuButton {
-                    label: "输入页数"
-                    w: 70
-                    h: 22
-                    onClicked: {
-                        activePanel = "";
-                        showKeyboard(String(getCurrentPage()), function (text) {
-                            var page = parseInt(text);
-                            if (!isNaN(page))
-                                jumpToPage(page);
-                        });
-                    }
-                }
-                MenuButton {
-                    label: "输入百分比"
-                    w: 78
-                    h: 22
-                    onClicked: {
-                        activePanel = "";
-                        showKeyboard(String(getProgressPercent()), function (text) {
-                            var percent = parseInt(text);
-                            if (!isNaN(percent))
-                                jumpToPercent(percent);
-                        });
-                    }
-                }
-                MenuButton {
-                    label: "关闭"
-                    w: 50
-                    h: 22
-                    onClicked: closePanels()
                 }
             }
         }
