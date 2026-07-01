@@ -6,7 +6,7 @@ import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PORT = 8088
-MUSIC_DIR = "/userdisk/Music"
+MUSIC_DIR = "/userdisk/Novels"
 
 
 def lan_ips():

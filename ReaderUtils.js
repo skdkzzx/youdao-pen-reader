@@ -1,7 +1,7 @@
 // ReaderUtils.js - 阅读器工具函数
 .pragma library
 
-var defaultBookFolder = "/userdisk/Music/";
+var defaultBookFolder = "/userdisk/Novels/";
 var defaultBookSuffix = ".txt";
 
 function setDefaults(folder, suffix) {

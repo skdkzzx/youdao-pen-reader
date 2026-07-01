@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 const PORT = 8088;
-const MUSIC_DIR = "/userdisk/Music";
+const MUSIC_DIR = "/userdisk/Novels";
 let lastMessage = "";
 
 function lanIps() {
