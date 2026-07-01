@@ -2715,49 +2715,37 @@ Rectangle {
 
     Rectangle {
         id: bookmarkPanel
-        visible: activePanel === "bookmarks" || bookmarkPanel.opacity > 0.01
-        opacity: activePanel === "bookmarks" ? 1 : 0
-        scale: 1
+        visible: activePanel === "bookmarks"
         anchors.fill: parent
-        anchors.margins: 10
-        radius: 6
-        color: bgColor === "#263238" ? "#37474F" : "#FFFFFF"
-        border.color: "#CCCCCC"
-        z: 50
-        Behavior on opacity {
-            NumberAnimation {
-                duration: 180
-                easing.type: Easing.OutCubic
-            }
-        }
-        Behavior on scale {
-            NumberAnimation {
-                duration: 180
-                easing.type: Easing.OutBack
-            }
-        }
+        color: bgColor
+        z: 40
 
         Column {
             anchors.fill: parent
-            anchors.margins: 8
+            anchors.margins: 6
             spacing: 5
 
             Row {
                 width: parent.width
                 height: 24
+                spacing: 6
+                Rectangle {
+                    width: 50; height: 24; radius: 4; color: "#DDDDDD"
+                    Text { anchors.centerIn: parent; text: "返回"; font.pixelSize: 11; color: "#333333"; font.family: "Microsoft YaHei" }
+                    MouseArea { anchors.fill: parent; onClicked: closePanels() }
+                }
                 Text {
-                    width: parent.width - 30
+                    width: parent.width - 102
                     text: "书签 (" + bookmarkList.length + ")"
-                    font.pixelSize: 12
-                    font.bold: true
-                    color: textColor
-                    verticalAlignment: Text.AlignVCenter
+                    font.pixelSize: 13; font.bold: true; color: textColor
+                    verticalAlignment: Text.AlignVCenter; horizontalAlignment: Text.AlignHCenter
                     font.family: "Microsoft YaHei"
                 }
-                MenuButton {
-                    label: "x"
-                    w: 24
-                    h: 24
+                Rectangle {
+                    width: 40; height: 24; radius: 4; color: "#DDDDDD"
+                    Text { anchors.centerIn: parent; text: "x"; font.pixelSize: 11; color: "#333"; font.family: "Microsoft YaHei" }
+                    MouseArea { anchors.fill: parent; onClicked: closePanels() }
+                }
                     onClicked: closePanels()
                 }
             }
@@ -2865,53 +2853,82 @@ Rectangle {
 
     Rectangle {
         id: autoPanel
-        visible: activePanel === "auto" || autoPanel.opacity > 0.01
-        opacity: activePanel === "auto" ? 1 : 0
-        scale: 1
+        visible: activePanel === "auto"
         anchors.fill: parent
-        anchors.margins: 25
-        radius: 6
-        color: bgColor === "#263238" ? "#37474F" : "#FFFFFF"
-        border.color: "#CCCCCC"
-        z: 50
-        Behavior on opacity {
-            NumberAnimation {
-                duration: 180
-                easing.type: Easing.OutCubic
-            }
-        }
-        Behavior on scale {
-            NumberAnimation {
-                duration: 180
-                easing.type: Easing.OutBack
-            }
-        }
+        color: bgColor
+        z: 40
 
         Column {
-            anchors.centerIn: parent
-            spacing: 9
-            width: parent.width - 16
-
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "自动翻页"
-                font.pixelSize: 14
-                font.bold: true
-                color: textColor
-                font.family: "Microsoft YaHei"
-            }
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "间隔: " + autoScrollSeconds + " 秒/页"
-                font.pixelSize: 11
-                color: textColor
-                font.family: "Microsoft YaHei"
-            }
+            anchors.fill: parent
+            anchors.margins: 6
+            spacing: 5
 
             Row {
-                anchors.horizontalCenter: parent.horizontalCenter
+                width: parent.width
+                height: 24
                 spacing: 6
-                MenuButton {
+                Rectangle {
+                    width: 50; height: 24; radius: 4; color: "#DDDDDD"
+                    Text { anchors.centerIn: parent; text: "返回"; font.pixelSize: 11; color: "#333333"; font.family: "Microsoft YaHei" }
+                    MouseArea { anchors.fill: parent; onClicked: closePanels() }
+                }
+                Text {
+                    width: parent.width - 102
+                    text: "自动翻页"
+                    font.pixelSize: 13; font.bold: true; color: textColor
+                    verticalAlignment: Text.AlignVCenter; horizontalAlignment: Text.AlignHCenter
+                    font.family: "Microsoft YaHei"
+                }
+                Rectangle {
+                    width: 40; height: 24; radius: 4; color: "#DDDDDD"
+                    Text { anchors.centerIn: parent; text: "x"; font.pixelSize: 11; color: "#333"; font.family: "Microsoft YaHei" }
+                    MouseArea { anchors.fill: parent; onClicked: closePanels() }
+                }
+            }
+
+            Flickable {
+                width: parent.width
+                height: parent.height - 34
+                contentWidth: width
+                contentHeight: autoContent.height
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
+                Column {
+                    id: autoContent
+                    width: parent.width
+                    spacing: 9
+
+                    Text {
+                        width: parent.width
+                        text: "间隔: " + autoScrollSeconds + " 秒/页"
+                        font.pixelSize: 11
+                        color: textColor
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Row {
+                        spacing: 6
+                        MenuButton {
+                            label: "输入秒数"
+                            w: 86
+                            h: 24
+                            bg: "#E3F2FD"
+                            fg: "#1565C0"
+                            onClicked: {
+                                activePanel = "";
+                                showKeyboard(String(autoScrollSeconds), function (text) {
+                                    autoScrollSeconds = normalizeAutoScrollSeconds(text);
+                                    saveSettings();
+                                    openPanel("auto");
+                                });
+                            }
+                        }
+                    }
+
+                    Row {
+                        spacing: 8
+                        MenuButton {
                     label: "输入秒数"
                     w: 86
                     h: 24
