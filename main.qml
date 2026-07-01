@@ -1788,7 +1788,7 @@ Rectangle {
 
             Text {
                 anchors.centerIn: parent
-                text: "菜单"
+                text: "☰"
                 font.pixelSize: 16
                 color: "#FFFFFF"
                 font.family: "Microsoft YaHei"
@@ -2616,13 +2616,9 @@ Rectangle {
                             onClicked: returnToShelf()
                         }
                         MenuButton {
-                            label: "章节"
+                            label: "跳转"
                             w: (menuContent.width - 8) / 3
-                            onClicked: {
-                                closePanels();
-                                buildChapterList();
-                                navigateTo("chapterList");
-                            }
+                            onClicked: openPanel("jump")
                         }
                         MenuButton {
                             label: "书签"
@@ -2681,6 +2677,160 @@ Rectangle {
                     Item {
                         width: parent.width
                         height: 10
+                    }
+                }
+            }
+        }
+    }
+
+    // ====== 跳转面板 ======
+    Rectangle {
+        id: jumpPanel
+        visible: activePanel === "jump"
+        anchors.fill: parent
+        color: bgColor
+        z: 40
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 6
+            spacing: 5
+
+            Row {
+                width: parent.width
+                height: 24
+                spacing: 6
+
+                Rectangle {
+                    width: 50
+                    height: 24
+                    radius: 4
+                    color: "#DDDDDD"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "返回"
+                        font.pixelSize: 11
+                        color: "#333333"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: closePanels()
+                    }
+                }
+
+                Text {
+                    width: parent.width - 102
+                    height: 24
+                    text: "跳转"
+                    font.pixelSize: 13
+                    font.bold: true
+                    color: textColor
+                    verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignHCenter
+                    font.family: "Microsoft YaHei"
+                }
+
+                Rectangle {
+                    width: 40
+                    height: 24
+                    radius: 4
+                    color: "#DDDDDD"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "x"
+                        font.pixelSize: 11
+                        color: "#333"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: closePanels()
+                    }
+                }
+            }
+
+            Flickable {
+                width: parent.width
+                height: parent.height - 34
+                contentWidth: width
+                contentHeight: jumpContent.height
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
+                Column {
+                    id: jumpContent
+                    width: parent.width
+                    spacing: 6
+
+                    Text {
+                        width: parent.width
+                        text: "第" + getCurrentPage() + "页 / 共" + getTotalPages() + "页 (" + getProgressPercent() + "%)"
+                        font.pixelSize: 10
+                        color: textColor
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Row {
+                        spacing: 4
+                        Repeater {
+                            model: [ { t: "0%", v: 0 }, { t: "25%", v: 25 }, { t: "50%", v: 50 }, { t: "75%", v: 75 }, { t: "100%", v: 100 } ]
+                            delegate: MenuButton {
+                                label: modelData.t
+                                w: 42
+                                h: 21
+                                bg: "#2f7dcc"
+                                fg: "#fff"
+                                onClicked: { jumpToPercent(modelData.v); closePanels(); }
+                            }
+                        }
+                    }
+
+                    MenuButton {
+                        label: "章节跳转"
+                        w: parent.width
+                        h: 24
+                        bg: "#E3F2FD"
+                        fg: "#1565C0"
+                        onClicked: {
+                            closePanels();
+                            buildChapterList();
+                            navigateTo("chapterList");
+                        }
+                    }
+
+                    Row {
+                        spacing: 6
+                        MenuButton {
+                            label: "输入页数"
+                            w: 70
+                            h: 22
+                            onClicked: {
+                                activePanel = "";
+                                showKeyboard(String(getCurrentPage()), function (text) {
+                                    var page = parseInt(text);
+                                    if (!isNaN(page)) jumpToPage(page);
+                                });
+                            }
+                        }
+                        MenuButton {
+                            label: "输入百分比"
+                            w: 78
+                            h: 22
+                            onClicked: {
+                                activePanel = "";
+                                showKeyboard(String(getProgressPercent()), function (text) {
+                                    var percent = parseInt(text);
+                                    if (!isNaN(percent)) jumpToPercent(percent);
+                                });
+                            }
+                        }
+                        MenuButton {
+                            label: "关闭"
+                            w: 50
+                            h: 22
+                            onClicked: closePanels()
+                        }
                     }
                 }
             }
