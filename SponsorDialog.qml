@@ -40,7 +40,7 @@ Rectangle {
 
                 Text {
                     width: parent.width
-                    text: "支持一下作者"
+                    text: "❤ 支持一下作者"
                     font.pixelSize: 13
                     font.bold: true
                     color: "#E65100"
@@ -49,7 +49,7 @@ Rectangle {
 
                 Text {
                     width: parent.width
-                    text: "这款阅读器花了很长时间\n开发和打磨，如果觉得好用\n希望能请作者喝杯奶茶\n你的支持是我的动力"
+                    text: "这款阅读器花了很长时间\n开发和打磨，如果觉得好用\n希望能请作者喝杯奶茶 ☕\n你的支持是我的动力 ❤"
                     font.pixelSize: 9
                     color: "#666666"
                     wrapMode: Text.WordWrap
