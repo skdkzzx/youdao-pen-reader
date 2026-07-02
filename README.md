@@ -1,8 +1,8 @@
-# 电子书阅读器 v6.5.0
+# 电子书阅读器 v6.6.0
 
 [许可证: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)(https://www.gnu.org/licenses/gpl-3.0)
 
-一款专为词典笔设计的小说阅读器插件，支持本地 `.txt` 小说阅读，并提供局域网网页上传功能，让你轻松在词典笔上看小说。
+一款专为词典笔设计的小说阅读器插件，支持本地 `.txt` 小说阅读，并提供网页上传方式，让你轻松在词典笔上看小说。
 
 插件基于 [PenMods](https://github.com/PenUniverse/PenMods) 插件环境开发，适用于已经刷入或修改为 PenMods 相关系统的设备。
 
@@ -64,13 +64,12 @@
 - 底部弹出式黑色圆角提示，2 秒自动消失
 - 书签添加成功、模式切换等操作均有 Toast 反馈
 
-### 局域网上传
+### 网页上传
 
-- - 内置 HTTP 上传服务器（端口 8088）
-- - 支持 Python3 和 Node.js 两种运行时（自动检测）
-- - 手机/电脑浏览器打开即用，无需安装额外 App
-- - 上传的文件自动保存到 `/userdisk/Music/小说/` 目录
-- - 文件名自动清理特殊字符，确保兼容性
+- 首页一键启动上传服务，手机/电脑浏览器打开 IP 即可上传 .txt 小说
+- 无需安装任何工具，纯网页操作，支持拖拽选择文件
+- 上传完成后自动保存到 `/userdisk/Music/小说/` 目录
+- 使用完毕可一键停止服务，释放资源
 
 ## 文件结构
 
@@ -83,10 +82,9 @@ novel-reader/
 ├── SponsorDialog.qml     # 赞赏弹窗组件
 ├── TutorialPage.qml      # 使用教程页面
 ├── metadata.json         # 插件元数据（ID、版本、作者等）
-├── libshell_plugin.so    # Shell 插件原生库（用于启动上传服务）
-├── start-uploader.sh     # 上传服务启动脚本（自动检测 python3/node）
-├── uploader.py           # Python 版上传 HTTP 服务器
-├── uploader.js           # Node.js 版上传 HTTP 服务器
+├── libshell_plugin.so    # Shell 插件原生库（执行 shell 命令，如探测 IP）
+├── upload_server.py      # Python3 网页上传服务器
+├── uploader.sh            # 上传服务启动脚本
 ├── Thanks.PNG            # 爱发电赞赏二维码
 ├── weixin.png            # 微信赞赏二维码
 ├── icon.png              # 应用图标
@@ -98,178 +96,9 @@ novel-reader/
 
 - 已安装或使用 PenMods 修改过的词典笔系统
 - 插件系统支持 QML 插件加载
-- 如需使用局域网上传功能，词典笔系统内需要有 `python3` 或 `node`
 - 词典笔和手机/电脑需连接至同一局域网 Wi-Fi
 
 ## 安装方式
-### 安装`python3` 和 `node`
-
-## 1. 前置准备
-
-### 1.1 PC 端
-
-- ADB 已安装并能连接设备
-- 网络可访问以下站点：
-  - `https://nodejs.org`（Node.js 官方下载）
-  - `https://github.com`（Python 预编译包）
-
-### 1.2 设备端
-#### 确认设备连接
-adb devices
-#### 输出示例:
-#### List of devices attached
-#### 2CA0000000000    device
-
-## 2. 下载预编译包
-
-### 2.1 Python 3 (python-build-standalone)
-
-> **来源**: [astral-sh/python-build-standalone](https://github.com/astral-sh/python-build-standalone)
->
-
-前往 [Releases 页面](https://github.com/astral-sh/python-build-standalone/releases)，找到最新版本（如 `20260610`）。
-
-下载对应的 **aarch64 install_only** 包：
-
-| Python 版本 | 下载文件名 |
-|-------------|-----------|
-| **3.11** | `cpython-3.11.XX+YYYYMMDD-aarch64-unknown-linux-gnu-install_only.tar.gz` |
-
-
-> ⚠️ 务必选择 `install_only` 版本，体积更小；`aarch64-unknown-linux-gnu` 对应 glibc 版本。
-
-### 2.2 Node.js
-
-> **来源**: [nodejs.org](https://nodejs.org)
->
-> **⚠️ 重要**：Node.js v18 起要求 **glibc ≥ 2.28**，而本设备只有 **glibc 2.27**。因此必须使用 **Node.js v16 LTS**！
-
-直接下载 Node.js v16.20.2 ARM64 版：
-
-```bash
-# 命令行下载 (Windows/Linux/macOS)
-curl -L -o node-v16.20.2-linux-arm64.tar.xz \
-  "https://nodejs.org/dist/v16.20.2/node-v16.20.2-linux-arm64.tar.xz"
-```
-
-或浏览器访问：https://nodejs.org/dist/v16.20.2/node-v16.20.2-linux-arm64.tar.xz
-
-### 2.3 确认文件
-
-下载完成后，两个文件名如下：
-
-```
-cpython-3.11.15+20260610-aarch64-unknown-linux-gnu-install_only.tar.gz  (~49 MB)
-node-v16.20.2-linux-arm64.tar.xz                                         (~22 MB)
-```
-
----
-
-## 3. 推送到设备
-
-```bash
-# 推送 Python
-adb push cpython-3.11.15+20260610-aarch64-unknown-linux-gnu-install_only.tar.gz \
-  /userdisk/PenMods/plugins/novel-reader/
-
-# 推送 Node.js
-adb push node-v16.20.2-linux-arm64.tar.xz \
-  /userdisk/PenMods/plugins/novel-reader/
-
-# 确认文件已推送
-adb shell ls -la /userdisk/PenMods/plugins/novel-reader/*.tar.*
-```
-
----
-
-## 4. 解压安装
-
-### 4.1 Python（tar.gz 格式）
-
-```bash
-adb shell
-
-# 进入目标目录
-cd /userdisk/PenMods/plugins/novel-reader
-
-# 解压 (BusyBox tar 支持 -z 即 gzip)
-tar -xzf cpython-*.tar.gz
-
-# 验证
-./python/bin/python3 --version
-# 输出: Python 3.11.15
-```
-
-### 4.2 Node.js（tar.xz 格式）
-
-BusyBox 的 tar 不支持 `-J`（xz），需要两步：
-
-```bash
-# 第一步: 先解 xz 压缩
-unxz node-v16.20.2-linux-arm64.tar.xz
-# 得到 node-v16.20.2-linux-arm64.tar
-
-# 第二步: 解 tar 包
-tar -xf node-v16.20.2-linux-arm64.tar
-
-# 验证
-./node-v16.20.2-linux-arm64/bin/node --version
-# 输出: v16.20.2
-```
-
-### 4.3 清理安装包
-
-```bash
-# 删除压缩包，释放空间
-rm -f cpython-*.tar.gz node-*.tar.xz node-*.tar
-```
-
----
-
-## 5. 全局配置
-
-将 Python 和 Node.js 链接到系统 PATH 中：
-
-```bash
-# 创建软链接
-ln -sf /userdisk/PenMods/plugins/novel-reader/python/bin/python3 /usr/bin/python3
-ln -sf /userdisk/PenMods/plugins/novel-reader/python/bin/python3 /usr/bin/python
-ln -sf /userdisk/PenMods/plugins/novel-reader/node-v16.20.2-linux-arm64/bin/node   /usr/bin/node
-ln -sf /userdisk/PenMods/plugins/novel-reader/node-v16.20.2-linux-arm64/bin/npm    /usr/bin/npm
-
-# 退出 adb shell
-exit
-```
-
-
-
----
-
-## 6. 验证安装
-
-```bash
-# 全局验证（从任意目录）
-adb shell python3 --version
-adb shell node --version
-adb shell npm --version
-
-# 预期输出:
-# Python 3.11.15
-# v16.20.2
-# 8.19.4
-```
-
-```bash
-# 验证 command -v 能找到
-adb shell "command -v python3 && command -v node && command -v npm"
-
-# 预期输出:
-# /usr/bin/python3
-# /usr/bin/node
-# /usr/bin/npm
-```
-### 安装插件
-通过 PenMods 插件目录安装
 
 将整个 `novel-reader` 文件夹复制到 PenMods 的插件目录下：
 
@@ -304,103 +133,26 @@ adb shell "command -v python3 && command -v node && command -v npm"
 
 ## 上传小说的方式
 
-### 方式一：局域网网页上传（推荐）
+阅读器内置了 Python3 网页上传服务器，一键启动后，手机/电脑浏览器打开词典笔 IP 即可上传 .txt 小说，无需安装任何额外工具。
 
-这是最简单的上传方式，无需任何工具，手机/电脑浏览器即可完成。
-
-#### 1. 启动上传服务
-
-打开阅读器后，插件会尝试自动启动上传服务。
-
-启动成功后，首页会显示类似下面的网址：
-
-```
-http://192.168.1.23:8088
-```
-
-如果服务未自动启动，可以点击首页的"启动上传"按钮手动启动。
-
-#### 2. 上传小说
-
-在同一 Wi-Fi 下，用手机或电脑浏览器打开这个地址，即可看到上传页面。
-
-选择手机/电脑上的 `.txt` 文件，点击"上传 txt"按钮即可。
-
-上传后的小说会自动保存到 `/userdisk/Music/小说/` 目录。
-
-#### 3. 查看小说
-
-上传完成后，回到阅读器的"我的书架"，即可看到上传的小说。
-
-#### 常见问题
-
-如果首页一直显示"上传服务启动中"，可能是：
-
-- 系统内没有 `python3` 或 `node`（可通过 SSH 执行 `which python3` 或 `which node` 检查）
-- 插件的 shell 启动能力没有正常加载
-- 端口 8088 已被其他程序占用
-
-### 方式二：通过 SSH 上传（WinSCP / Termius）
-
-如果网页上传不可用，也可以使用 SSH 直接把小说文件传到词典笔里。
-
-#### 前置条件
+### 前置条件
 
 - 词典笔已经连接 Wi-Fi
 - 电脑或手机和词典笔在同一个 Wi-Fi 下
-- PenMods 开发者设置里已经开启 SSH
-- 已经在 PenMods 开发者设置里设置好 SSH 密码
-- 已经知道词典笔的 IP 地址
+- 词典笔已安装 Python3（PenMods 环境通常自带）
 
-#### 查看词典笔 IP
+### 上传步骤
 
-通常可以在词典笔的 Wi-Fi 设置中查看当前连接网络的 IP 地址。常见的格式类似于：
+1. 打开阅读器，在首页点击 **「▶ 启动上传服务」** 按钮
+2. 等待按钮变为红色 **「⏹ 停止上传服务」**，上方显示绿色地址
+3. 在手机/电脑浏览器中打开显示的地址（例如 `http://192.168.1.23:8088`）
+4. 在网页中点击或拖拽选择 `.txt` 文件，点击上传
+5. 上传完成后，回到阅读器「我的书架」即可看到
+6. 使用完毕可点击 **「⏹ 停止上传服务」** 释放资源
 
-```
-192.168.1.23
-```
+### 查看词典笔 IP
 
-#### SSH 连接信息
-
-```
-地址：词典笔 IP（例如 192.168.1.23）
-端口：22
-用户名：root
-密码：PenMods 开发者设置中设置的 SSH 密码
-```
-
-如果你的系统用户名不是 `root`，请以实际系统为准。
-
-#### 使用电脑上传：WinSCP
-
-1. 下载并安装 [WinSCP](https://winscp.net/)
-2. 打开 WinSCP，新建连接
-3. 填写连接信息：
-   - 文件协议：SFTP
-   - 主机名：词典笔的 IP
-   - 端口号：22
-   - 用户名：root
-   - 密码：你在 PenMods 开发者设置中设置的 SSH 密码
-4. 点击登录/连接
-5. 如果第一次连接弹出主机密钥提示，选择接受
-6. 连接成功后，进入 `/userdisk/Music/小说/` 目录
-7. 在左侧找到电脑上的 `.txt` 小说文件，拖到右侧即可
-8. 上传完成后，打开阅读器，进入"我的书架"查看
-
-#### 使用手机上传：Termius
-
-1. 在手机上安装 Termius（iOS/Android 均可）
-2. 新建连接，填写：
-   - Host：词典笔的 IP
-   - Port：22
-   - Username：root
-   - Password：你在 PenMods 开发者设置中设置的 SSH 密码
-3. 保存并连接
-4. 第一次连接时如果出现确认主机指纹的提示，选择确认
-5. 连接成功后，进入 SFTP 文件管理界面
-6. 进入 `/userdisk/Music/小说/` 目录
-7. 选择手机里的 `.txt` 小说文件，上传即可
-8. 上传完成后，回到阅读器"我的书架"查看
+打开阅读器首页，启动上传服务后顶部会显示类似 `上传 http://192.168.1.23:8088` 的地址。也可以在词典笔的 Wi-Fi 设置中查看 IP。
 
 ## 阅读界面操作说明
 
@@ -458,25 +210,18 @@ http://192.168.1.23:8088
 
 - **UI 框架**：Qt Quick / QML（基于 Qt 5.15）
 - **数据存储**：Qt LocalStorage（SQLite）
-- **上传服务**：Python3（http.server）/ Node.js（http 模块）
+- **上传方式**：Python3 内网网页上传（浏览器打开即可，无需额外工具）
 - **原生插件**：libshell_plugin.so（Shell 命令执行能力）
 
-### 上传服务原理
+### IP 显示原理
 
-上传服务通过 `start-uploader.sh` 脚本启动，脚本会依次检测系统中是否有 `python3` 和 `node`：
+阅读器启动时通过 `libshell_plugin.so` 执行 shell 命令探测本机局域网 IP：
 
-1. 如果有 `python3`，使用 `uploader.py` 启动 HTTP 服务
-2. 如果没有 `python3` 但有 `node`，使用 `uploader.js` 启动 HTTP 服务
-3. 如果都没有，输出错误提示
+- 依次尝试 `ip addr` / `ifconfig` / `hostname -I` / `/proc/net/fib_trie`
+- 结果写入临时文件，QML 解析出第一个有效的局域网 IPv4
+- 启动上传服务后在首页显示 `上传 http://<IP>:8088`，浏览器直接打开即可
 
-两种实现功能完全一致：
-
-- 监听 0.0.0.0:8088 端口
-- 提供 HTML 上传页面（GET /）
-- 处理文件上传（POST /upload）
-- 自动检测局域网 IP 并显示
-- 文件保存到 `/userdisk/Music/小说/` 目录
-- 文件名自动清理特殊字符，确保兼容性
+上传服务使用 Python3 标准库实现，在设备本地运行 HTTP 服务器，手机/电脑通过浏览器访问上传网页，文件保存到 `/userdisk/Music/小说/` 目录。
 
 ### 数据存储
 
@@ -545,21 +290,18 @@ http://192.168.1.23:8088
 - 确认文件后缀是 `.txt`（大小写均可）
 - 尝试返回首页再重新进入书架
 
+### 首页不显示 IP
+
+- 确认词典笔已连接 Wi-Fi
+- IP 探测失败时首页仍会显示 `SFTP 上传   端口 22   用户 root`，可在词典笔 Wi-Fi 设置里手动查看 IP
+- 确认插件的 shell 执行能力（libshell_plugin.so）已正常加载
+
 ### 上传网页打不开
 
-- 确认词典笔和手机/电脑在同一个 Wi-Fi 下
-- 确认首页显示的地址是否为 `http://词典笔IP:8088`
-- 确认浏览器输入的 IP 是否和词典笔 Wi-Fi 设置中显示的一致
-- 确认词典笔系统内是否有 `python3` 或 `node`（可通过 SSH 执行 `which python3` 或 `which node` 检查）
-- 尝试点击首页的"启动上传"按钮重新启动服务
-
-### SSH 连接失败
-
-- 确认 PenMods 开发者设置中已经开启 SSH
-- 确认 SSH 密码已经设置
-- 确认 IP 地址填写正确
-- 确认手机/电脑和词典笔在同一个局域网
-- 确认端口为 `22`
+- 确认已点击「启动上传服务」按钮，首页显示绿色地址
+- 确认手机/电脑和词典笔在同一个 Wi-Fi 下
+- 确认词典笔已安装 Python3（可在 PenMods 中安装）
+- 确认地址输入正确（包括 `http://` 前缀和 `:8088` 端口）
 
 ### 手动输入书名打不开
 
@@ -580,7 +322,7 @@ http://192.168.1.23:8088
 ## 注意事项
 
 - 本插件不会自带小说资源，请自行上传你拥有合法来源的 `.txt` 文件
-- 局域网上传只在同一 Wi-Fi 内使用，不需要公网地址
+- SFTP 上传只在同一 Wi-Fi 内使用，不需要公网地址
 - 默认小说目录固定为 `/userdisk/Music/小说/`
 - 如果修改系统目录或删除小说文件，书架会根据扫描结果更新
 - 书架最多显示 50 本小说（按最近阅读时间排序）
@@ -588,9 +330,20 @@ http://192.168.1.23:8088
 ## 版本信息
 
 - **插件 ID**：`com.reader.novel`
-- **当前版本**：6.5.0
+- **当前版本**：6.6.0
 - **作者**：skdkzzx
 - **基于**：PenMods 插件环境
+
+## 更新日志 (v6.6.0)
+
+### 重大变更
+- **上传方式改为网页上传**：使用 Python3 搭建内网 HTTP 服务器，其他设备浏览器打开 IP 即可上传 .txt 小说
+- 首页新增「启动上传服务」/「停止上传服务」按钮，一键开关
+- 无需再借助 WinSCP/Termius 等 SFTP 工具，纯网页操作
+
+### 新增文件
+- `upload_server.py`：Python3 网页上传服务器（纯标准库，无需第三方依赖）
+- 重写 `uploader.sh`：上传服务启动/停止/状态管理脚本
 
 ## 更新日志 (v6.5.0)
 

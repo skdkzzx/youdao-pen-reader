@@ -1,7 +1,7 @@
 {
     "id": "com.reader.novel",
     "name": "电子书阅读器",
-    "version": "6.5.0",
+    "version": "6.6.0",
     "author": "skdkzzx",
     "description": "支持上传小说的小说阅读器",
     "icon": "file://userdisk/PenMods/plugins/novel-reader/icon.png",

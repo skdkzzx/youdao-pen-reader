@@ -373,15 +373,14 @@ Rectangle {
         uploaderAddress = "";
         _ipQueried = false;
         _uploadRetry = 0;
-        uploaderController.sendCommand("rm -f /tmp/novel-uploader.log 2>/dev/null; echo ''");
-        uploaderController.sendCommand("sh /userdisk/PenMods/plugins/novel-reader/start-uploader.sh >/tmp/novel-uploader.log 2>&1 &");
+        uploaderController.sendCommand("rm -f /tmp/novel-uploader.log; sh /userdisk/PenMods/plugins/novel-reader/start-uploader.sh");
     }
 
     function stopUploaderService() {
         if (!uploaderStarted)
             return;
         if (uploaderController) {
-            uploaderController.sendCommand("fuser -k 8088/tcp 2>/dev/null || kill $(fuser 8088/tcp 2>/dev/null) 2>/dev/null || pkill -f 'uploader\.py\|uploader\.js' 2>/dev/null; echo ''");
+            uploaderController.sendCommand("fuser -k 8088/tcp 2>/dev/null || pkill -f 'novel-httpd\|upload_server\|server\.js\|uploader\.py\|uploader\.js' 2>/dev/null; echo ''");
         }
         uploaderStarted = false;
         uploaderStatus = "上传服务已停止";
@@ -437,8 +436,8 @@ Rectangle {
                     }
                 }
             }
-            if (log.indexOf("未找到 python3 或 node") >= 0 || log.indexOf("无法启动 HTTP 服务器") >= 0) {
-                uploaderStatus = "缺少 python3/node，且 busybox httpd 不可用";
+            if (log.indexOf("ERROR:") >= 0 || log.indexOf("未找到 python3 或 node") >= 0 || log.indexOf("无法启动 HTTP 服务器") >= 0) {
+                uploaderStatus = "缺少运行环境，请 SSH 安装 node: opkg install node";
                 return;
             }
             if (log.indexOf("Address already in use") >= 0 || log.indexOf("EADDRINUSE") >= 0) {

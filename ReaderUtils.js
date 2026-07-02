@@ -394,8 +394,9 @@ function getThemeColors(name) {
     return themes[name] || themes["默认"];
 }
 
+// 从上传服务日志中提取 URL
 function getUploaderUrl(output) {
-    var match = output.match(/http:\/\/[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+:8088/);
+    var match = output.match(/http:\/\/[\d.]+:8088/);
     return match ? match[0] : "";
 }
 
