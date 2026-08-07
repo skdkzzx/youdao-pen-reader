@@ -201,7 +201,7 @@ Rectangle {
         id: uploaderOutputTimer
         interval: 500
         repeat: true
-        running: true
+        running: false
         onTriggered: refreshUploaderOutput()
     }
 
@@ -388,17 +388,19 @@ Rectangle {
         _uploadRetry = 0;
         var pluginDir = Qt.resolvedUrl(".").replace("file://", "");
         uploaderController.sendCommand("rm -f /tmp/novel-uploader.log; sh " + shellEscape(pluginDir + "/start-uploader.sh"));
+        uploaderOutputTimer.start();
     }
 
     function stopUploaderService() {
         if (!uploaderStarted)
             return;
         if (uploaderController) {
-            uploaderController.sendCommand("fuser -k 8088/tcp 2>/dev/null || pkill -f 'novel-httpd' 2>/dev/null; pkill -f 'server.js' 2>/dev/null; pkill -f 'server.py' 2>/dev/null; pkill -f 'upload_server' 2>/dev/null; echo ''");
+            uploaderController.sendCommand("fuser -k 8088/tcp 2>/dev/null || pkill -f 'novel-httpd' 2>/dev/null; pkill -f 'node.*server.js' 2>/dev/null; pkill -f 'python3.*server.py' 2>/dev/null; pkill -f 'upload_server' 2>/dev/null; echo ''");
         }
         uploaderStarted = false;
         uploaderStatus = "上传服务已停止";
         uploaderAddress = "";
+        uploaderOutputTimer.stop();
     }
 
     function openShelf() {
@@ -417,7 +419,7 @@ Rectangle {
     }
 
     function openTutorial() {
-        tutorialLines = ["【使用教程】", "", "一、小说存放位置", "小说文件请放到：", defaultBookFolder, "支持 .txt 格式，文件名随意。", "", "二、打开小说", "1. 自动扫描：把 txt 放到上面的目录后，", "   进入「我的书架」即可看到。", "2. 手动输入：首页点击「手动输入书名」，", "   输入小说名即可，不需要输完整路径。", "", "三、上传小说", "1. 局域网上传（推荐）：", "   点击「启动上传」，首页会显示一个网址，", "   手机/电脑浏览器打开该网址即可上传。", "   手机和词典笔需连接同一个 Wi-Fi。", "2. SSH 上传：", "   用 WinSCP（电脑）或 Termius（手机）", "   通过 SFTP 连接词典笔，", "   把 txt 文件传到 " + defaultBookFolder + "。", "   连接信息：IP:词典笔IP 端口:22", "   用户名:root 密码:PenMods中设置的SSH密码", "", "四、阅读操作", "· 点击屏幕左侧 1/3：上一页", "· 点击屏幕右侧 1/3：下一页", "· 点击屏幕中间 1/3：打开菜单", "· 上下左右滑动：翻页", "", "五、菜单功能", "· 进度条：拖拽快速跳转", "· 字号：小/中/大 三档", "· 行距：紧凑/标准/宽松", "· 主题：7种配色可选", "· 书签：添加/查看/删除书签", "· 跳转：按百分比/页码/章节跳转", "· 自动翻页：可自定义间隔秒数", "· 上一章/下一章：快速切换章节", "", "六、常见问题", "Q: 书架没有显示小说？", "A: 确认文件在 " + defaultBookFolder + " 且后缀是 .txt", "", "Q: 上传网页打不开？", "A: 确认手机和词典笔在同一 Wi-Fi，", "   并检查词典笔系统是否有 python3 或 node。", "", "Q: 手动输入书名打不开？", "A: 只需输入小说名，如「三体」，", "   不需要输入完整路径。", "", "【以上为全部教程内容】"];
+        tutorialLines = ["【使用教程】", "", "一、小说存放位置", "小说文件请放到：", defaultBookFolder, "支持 .txt 格式，文件名随意。", "", "二、打开小说", "1. 自动扫描：把 txt 放到上面的目录后，", "   进入「我的书架」即可看到。", "2. 手动输入：首页点击「手动输入书名」，", "   输入小说名即可，不需要输完整路径。", "", "三、上传小说", "1. 局域网上传（推荐）：", "   点击「启动上传」，首页会显示一个网址，", "   手机/电脑浏览器打开该网址即可上传。", "   手机和词典笔需连接同一个 Wi-Fi。", "2. SSH 上传：", "   用 WinSCP（电脑）或 Termius（手机）", "   通过 SFTP 连接词典笔，", "   把 txt 文件传到 " + defaultBookFolder + "。", "   连接信息：IP:词典笔IP 端口:22", "   用户名:root 密码:PenMods中设置的SSH密码", "", "四、阅读操作", "· 点击屏幕左侧 1/3：上一页", "· 点击屏幕右侧 1/3：下一页", "· 点击屏幕中间 1/3：打开菜单", "· 上下左右滑动：翻页", "", "五、菜单功能", "· 进度条：拖拽快速跳转", "· 字号：小/中/大 三档", "· 行距：紧凑/标准/宽松", "· 主题：7种配色可选", "· 书签：添加/查看/删除书签", "· 跳转：按百分比/页码/章节跳转", "· 自动翻页：可自定义间隔秒数", "· 上一章/下一章：快速切换章节", "", "六、常见问题", "Q: 书架没有显示小说？", "A: 确认文件在 " + defaultBookFolder + " 且后缀是 .txt", "", "Q: 上传网页打不开？", "A: 确认手机和词典笔在同一 Wi-Fi，", "   并检查词典笔系统是否有 node 或 python3 或 busybox。", "", "Q: 手动输入书名打不开？", "A: 只需输入小说名，如「三体」，", "   不需要输入完整路径。", "", "【以上为全部教程内容】"];
         tutorialLine = 0;
         showTutorial = true;
     }
