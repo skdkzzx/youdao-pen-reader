@@ -13,7 +13,17 @@ check_port() {
 do_start() {
     echo "启动上传服务..."
     sh "$SCRIPT_DIR/start-uploader.sh"
-    sleep 2
+    # 等待最多 5 秒检测端口
+    local i=0
+    while [ $i -lt 25 ]; do
+        sleep 0.2
+        if check_port; then
+            do_status
+            return 0
+        fi
+        i=$((i + 1))
+    done
+    echo "启动超时"
     do_status
 }
 
@@ -22,7 +32,8 @@ do_stop() {
     fuser -k ${PORT}/tcp 2>/dev/null || true
     pkill -f 'novel-httpd' 2>/dev/null || true
     pkill -f 'upload_server' 2>/dev/null || true
-    pkill -f 'server.js' 2>/dev/null || true
+    pkill -f 'node.*server.js' 2>/dev/null || true
+    pkill -f 'python3.*server.py' 2>/dev/null || true
     sleep 0.5
     echo "已停止"
 }

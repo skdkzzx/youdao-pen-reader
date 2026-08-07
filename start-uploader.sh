@@ -1,5 +1,5 @@
 #!/bin/sh
-# 小说上传服务启动脚本 v2
+# 小说上传服务启动脚本 v2.1
 # 自动选择可用后端: node > python3 > busybox httpd
 LOG_FILE="/tmp/novel-uploader.log"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -174,10 +174,9 @@ uploadBtn.addEventListener('click',function(){
     x.setRequestHeader('Content-Type','application/x-www-form-urlencoded');
     x.onload=function(){
       if(x.status===200){showMsg('✅ '+selectedFile.name+' 上传成功！','success');clearFile();}
-      else showMsg('上传失败，请重试','error');
-      uploadBtn.disabled=false;uploadBtn.textContent='上传 TXT';
+      else{showMsg('上传失败，请重试','error');uploadBtn.disabled=false;uploadBtn.textContent='请先选择文件';}
     };
-    x.onerror=function(){showMsg('网络错误，请检查连接','error');uploadBtn.disabled=false;uploadBtn.textContent='上传 TXT';};
+    x.onerror=function(){showMsg('网络错误，请检查连接','error');uploadBtn.disabled=false;uploadBtn.textContent='请先选择文件';};
     x.send('name='+encodeURIComponent(selectedFile.name)+'&data='+encodeURIComponent(b64));
   };
   r.readAsArrayBuffer(selectedFile);
@@ -191,9 +190,25 @@ HTMLEOF
 cat > "$HTTPD_ROOT/upload.cgi" << 'CGIEOF'
 #!/bin/sh
 UPLOAD_DIR="/userdisk/Music/小说"
-body=$(dd bs=1 count=${CONTENT_LENGTH:-0} 2>/dev/null)
+
+# 只接受 POST 请求
+if [ "$REQUEST_METHOD" != "POST" ]; then
+    echo "Content-Type: text/plain"
+    echo ""
+    echo "ERR Method not allowed"
+    exit 0
+fi
+
+# 读取 POST 数据（优化：按块读取而非逐字节）
+body=""
+if [ -n "$CONTENT_LENGTH" ] && [ "$CONTENT_LENGTH" -gt 0 ] 2>/dev/null; then
+    body=$(dd bs=$CONTENT_LENGTH count=1 2>/dev/null || cat)
+fi
+
 name=$(echo "$body" | sed 's/.*name=\([^&]*\).*/\1/' | sed 's/+/ /g')
 data=$(echo "$body" | sed 's/.*data=\([^&]*\).*/\1/' | sed 's/+/ /g')
+
+# URL 解码（busybox printf %b 支持反斜杠转义）
 name=$(printf '%b' "$(echo "$name" | sed 's/%/\\x/g')" 2>/dev/null || echo "$name")
 name=$(basename "$name" 2>/dev/null || echo "$name")
 name=$(echo "$name" | sed 's/[\/:*?"<>|\\]/_/g')
@@ -201,9 +216,15 @@ name=$(echo "$name" | sed 's/[\/:*?"<>|\\]/_/g')
 echo "$name" | grep -qi '\.txt$' || name="${name}.txt"
 mkdir -p "$UPLOAD_DIR" 2>/dev/null
 echo "$data" | base64 -d > "$UPLOAD_DIR/$name" 2>/dev/null
-echo "Content-Type: text/plain"
-echo ""
-echo "OK $name"
+if [ $? -eq 0 ] && [ -s "$UPLOAD_DIR/$name" ]; then
+    echo "Content-Type: text/plain"
+    echo ""
+    echo "OK $name"
+else
+    echo "Content-Type: text/plain"
+    echo ""
+    echo "ERR decode failed"
+fi
 CGIEOF
 chmod +x "$HTTPD_ROOT/upload.cgi"
 
@@ -233,7 +254,7 @@ var server = http.createServer(function(req, res) {
                 var body = Buffer.concat(chunks).toString();
                 var params = qs.parse(body);
                 var name = String(params.name || 'novel.txt');
-                name = path.basename(name).replace(/[/:*?"<>|\\\\]/g, '_');
+                name = path.basename(name).replace(/[/:*?"<>|]/g, '_');
                 if (!name.toLowerCase().endsWith('.txt')) name += '.txt';
                 var data = Buffer.from(String(params.data || ''), 'base64');
                 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR);
@@ -259,7 +280,7 @@ NODEEOF
     else
         echo "ERROR: node started but port $PORT not listening" >>"$LOG_FILE"
         fuser -k ${PORT}/tcp 2>/dev/null || true
-        pkill -f "server.js" 2>/dev/null || true
+        pkill -f "node.*server.js" 2>/dev/null || true
     fi
 fi
 
@@ -278,6 +299,9 @@ import urllib.parse
 PORT = 8088
 UPLOAD_DIR = '/userdisk/Music/小说'
 HTTPD_ROOT = '/tmp/novel-httpd'
+
+class ReusableTCPServer(socketserver.TCPServer):
+    allow_reuse_address = True
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -324,7 +348,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         else:
             self.send_error(404)
 
-with socketserver.TCPServer(('0.0.0.0', PORT), Handler) as httpd:
+with ReusableTCPServer(('0.0.0.0', PORT), Handler) as httpd:
     print('http://0.0.0.0:' + str(PORT))
     httpd.serve_forever()
 PYEOF
@@ -339,7 +363,7 @@ PYEOF
     else
         echo "ERROR: python3 started but port $PORT not listening" >>"$LOG_FILE"
         fuser -k ${PORT}/tcp 2>/dev/null || true
-        pkill -f "server.py" 2>/dev/null || true
+        pkill -f "python3.*server.py" 2>/dev/null || true
     fi
 fi
 

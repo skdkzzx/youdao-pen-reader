@@ -387,7 +387,7 @@ Rectangle {
         _ipQueried = false;
         _uploadRetry = 0;
         var pluginDir = Qt.resolvedUrl(".").replace("file://", "");
-        uploaderController.sendCommand("rm -f /tmp/novel-uploader.log; sh '" + pluginDir + "/start-uploader.sh'");
+        uploaderController.sendCommand("rm -f /tmp/novel-uploader.log; sh " + shellEscape(pluginDir + "/start-uploader.sh"));
     }
 
     function stopUploaderService() {

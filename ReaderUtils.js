@@ -397,8 +397,8 @@ function getThemeColors(name) {
 // 从上传服务日志中提取 URL
 function getUploaderUrl(output) {
     if (!output) return "";
-    // 先尝试匹配 Backend: 格式
-    var m = output.match(/Backend:\s*(\S+)/);
+    // 匹配 Backend: <backend_name> <url>
+    var m = output.match(/Backend:\s+\S+\s+(\S+)/);
     if (m) return m[1];
     // 回退：匹配最后一个 http:// URL
     var urls = output.match(/https?:\/\/[^\s]+/g);
