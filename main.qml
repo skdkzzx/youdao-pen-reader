@@ -866,8 +866,8 @@ Rectangle {
         activePanel = name;
     }
 
-    function returnToShelf() {
-        // 取消正在进行的翻页动画
+    // 清空阅读器状态（公共逻辑）
+    function clearReaderState() {
         if (animating) {
             pageSlideAnim.stop();
             pageTurnOverlay.visible = false;
@@ -878,11 +878,8 @@ Rectangle {
             turnDirection = 0;
             pendingLine = -1;
         }
-
-        // 先保存当前进度到内存（progressStore → dataCache），再清空状态
         if (currentUrl !== "")
             flushProgress();
-
         autoScroll = false;
         closePanels();
         currentUrl = "";
@@ -895,41 +892,17 @@ Rectangle {
         currentLine = 0;
         currentChapterIdx = -1;
         showNextChapter = false;
+    }
 
-        // 导航到书架
+    function returnToShelf() {
+        clearReaderState();
         navigateRoot();
         navigateTo("shelf");
         loadBookList();
     }
 
     function returnToHome() {
-        // 取消正在进行的翻页动画
-        if (animating) {
-            pageSlideAnim.stop();
-            pageTurnOverlay.visible = false;
-            pageTurnOverlay.x = 0;
-            animating = false;
-            turnDirection = 0;
-            pendingLine = -1;
-        }
-
-        // 先保存当前进度到内存，再清空状态
-        if (currentUrl !== "")
-            flushProgress();
-
-        autoScroll = false;
-        closePanels();
-        currentUrl = "";
-        fileName = "";
-        lines = [];
-        rawLines = [];
-        chapterBoundaries = [];
-        chapterList = [];
-        bookmarkList = [];
-        currentLine = 0;
-        currentChapterIdx = -1;
-        showNextChapter = false;
-
+        clearReaderState();
         navigateRoot();
         loadBookList();
     }
@@ -1127,8 +1100,14 @@ Rectangle {
 
             loadChapter(savedChapter);
         } catch (e) {
+            rawLines = [];
+            chapterBoundaries = [];
+            lines = [];
+            chapterList = [];
+            currentLine = 0;
+            currentChapterIdx = -1;
             isLoading = false;
-            statusMessage = "";
+            statusMessage = "文件处理失败";
         }
     }
 

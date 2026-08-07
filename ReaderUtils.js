@@ -75,7 +75,13 @@ function encodePath(url) {
     var encoded = "";
     for (var i = 0; i < p.length; i++) {
         var c = p.charAt(i);
-        encoded += c.charCodeAt(0) > 127 ? encodeURIComponent(c) : c;
+        var code = c.charCodeAt(0);
+        // 编码非 ASCII 字符 + 空格 + # + % + ? 等特殊字符
+        if (code > 127 || code === 0x20 || code === 0x23 || code === 0x25 || code === 0x3F) {
+            encoded += encodeURIComponent(c);
+        } else {
+            encoded += c;
+        }
     }
     return "file://" + encoded;
 }
