@@ -1,0 +1,83 @@
+    function _readLog(path) {
+        try {
+            var xhr = new XMLHttpRequest();
+            xhr.open("GET", "file://" + path, false);
+            xhr.send();
+            if (xhr.status === 200 || xhr.status === 0)
+                return xhr.responseText || "";
+        } catch (e) {}
+        return "";
+    }
+
+    function startUploaderService() {
+        if (uploaderStarted)
+            return;
+        uploaderController = (typeof shellPluginController !== "undefined") ? shellPluginController : null;
+        if (!uploaderController) {
+            uploaderStatus = "上传服务未加载";
+            return;
+        }
+
+        uploaderStarted = true;
+        uploaderStatus = "上传服务启动中";
+        uploaderAddress = "";
+        _ipQueried = false;
+        _uploadRetry = 0;
+        uploaderController.sendCommand("rm -f /tmp/novel-uploader.log 2>/dev/null; echo ''");
+        uploaderController.sendCommand("sh /userdisk/PenMods/plugins/novel-reader/start-uploader.sh >/tmp/novel-uploader.log 2>&1 &");
+    }
+
+    function stopUploaderService() {
+        if (!uploaderStarted)
+            return;
+        if (uploaderController) {
+            uploaderController.sendCommand("fuser -k 8088/tcp 2>/dev/null || kill $(fuser 8088/tcp 2>/dev/null) 2>/dev/null || pkill -f 'uploader\.py\|uploader\.js' 2>/dev/null; echo ''");
+        }
+        uploaderStarted = false;
+        uploaderStatus = "上传服务已停止";
+        uploaderAddress = "";
+    }
+
+    function refreshUploaderOutput() {
+        if (!uploaderStarted || uploaderAddress !== "")
+            return;
+
+        uploaderController = (typeof shellPluginController !== "undefined") ? shellPluginController : null;
+        if (!uploaderController)
+            return;
+
+        var log = _readLog("/tmp/novel-uploader.log");
+        if (log !== "") {
+            var url = ReaderUtils.getUploaderUrl(log);
+            if (url) {
+                uploaderAddress = url;
+                uploaderStatus = "上传服务已启动";
+                _uploadRetry = 0;
+                return;
+            }
+            var ips = log.match(/(\d+\.\d+\.\d+\.\d+)/g);
+            if (ips) {
+                for (var i = ips.length - 1; i >= 0; i--) {
+                    if (ips[i] !== "127.0.0.1" && ips[i].indexOf("169.254.") !== 0 && ips[i] !== "0.0.0.0") {
+                        uploaderAddress = "http://" + ips[i] + ":8088";
+                        uploaderStatus = "上传服务已启动";
+                        _uploadRetry = 0;
+                        return;
+                    }
+                }
+            }
+            if (log.indexOf("未找到 python3 或 node") >= 0) {
+                uploaderStatus = "缺少 python3/node";
+                return;
+            }
+            if (log.indexOf("Address already in use") >= 0 || log.indexOf("EADDRINUSE") >= 0) {
+                uploaderStatus = "端口 8088 被占用";
+                return;
+            }
+        }
+
+        _uploadRetry++;
+        if (_uploadRetry > 40) {
+            uploaderStatus = log === "" ? "上传服务未启动或日志为空" : "获取 IP 超时，请检查网络连接";
+        }
+    }
