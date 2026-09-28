@@ -89,13 +89,22 @@ function flushToFile() {
         // 安全转义单引号
         var safeB64 = b64.replace(/'/g, "'\\''");
 
-        // 写主位置
-        ctrl.sendCommand("printf '%s' '" + safeB64 + "' | base64 -d > " + BACKUP_PATH + ".tmp 2>/dev/null");
-        ctrl.sendCommand("[ -s " + BACKUP_PATH + ".tmp ] && mv " + BACKUP_PATH + ".tmp " + BACKUP_PATH + " 2>/dev/null || rm -f " + BACKUP_PATH + ".tmp");
+        // 修复：原实现把「写 tmp」与「mv tmp」拆成两条 sendCommand 调用。
+        // sendCommand 是异步且无返回确认的，两条命令之间的执行顺序没有保证，
+        // 可能出现 tmp 尚未写完就被 mv / 被后一条的 rm 删除的情况；
+        // 紧随其后的同步 XHR 校验因此读到旧内容，flushToFile 误判失败并
+        // 丢弃本次写入（表现为「添加书签失败」、进度不落盘）。
+        // 现将每个写入位置合并为单条命令，用 && 串联保证顺序。
+        var writeOne = function (target) {
+            ctrl.sendCommand(
+                "printf '%s' '" + safeB64 + "' | base64 -d > " + target + ".tmp 2>/dev/null"
+                + " && [ -s " + target + ".tmp ]"
+                + " && mv -f " + target + ".tmp " + target + " 2>/dev/null"
+                + " || rm -f " + target + ".tmp 2>/dev/null");
+        };
 
-        // 写备份位置
-        ctrl.sendCommand("printf '%s' '" + safeB64 + "' | base64 -d > " + BACKUP_PATH2 + ".tmp 2>/dev/null");
-        ctrl.sendCommand("[ -s " + BACKUP_PATH2 + ".tmp ] && mv " + BACKUP_PATH2 + ".tmp " + BACKUP_PATH2 + " 2>/dev/null || rm -f " + BACKUP_PATH2 + ".tmp");
+        writeOne(BACKUP_PATH);
+        writeOne(BACKUP_PATH2);
 
         // 验证主文件是否写入成功
         var verifyXhr = new XMLHttpRequest();
@@ -163,14 +172,23 @@ function saveSettingsToStore(settings) {
     writeState("settings", JSON.stringify(settings));
 }
 
+// 记录某本书「每章」的阅读位置。
+// 修复：原实现整本书只保存一个 chapterIdx + line，换章后回到旧章节时
+// 因 chapterIdx 不匹配而一律从第 0 行开始，等于丢失该章进度。
+// 现按 url + chapterIdx 分别保存，同时保留顶层字段兼容旧数据。
 function updateProgressMemory(progressStore, currentUrl, fileName, currentLine, totalLines, chapterIdx, bookPercent) {
     if (currentUrl === "") return;
+    var idx = chapterIdx !== undefined ? chapterIdx : 0;
+    var prev = progressStore[currentUrl] || {};
+    var chapters = prev.chapters || {};
+    chapters[String(idx)] = currentLine;
     progressStore[currentUrl] = {
         file: currentUrl,
         name: fileName,
         line: currentLine,
         totalLines: totalLines,
-        chapterIdx: chapterIdx !== undefined ? chapterIdx : 0,
+        chapterIdx: idx,
+        chapters: chapters,
         bookPercent: bookPercent !== undefined ? bookPercent : 0,
         timestamp: new Date().getTime()
     };
@@ -187,7 +205,13 @@ function loadProgressFromStore(progressStore, url) {
 
 function loadChapterProgress(progressStore, url, chapterIdx) {
     var item = progressStore[url];
-    if (item && parseInt(item.chapterIdx) === chapterIdx) {
+    if (!item) return 0;
+    // 优先读取该章的独立记录
+    if (item.chapters && item.chapters[String(chapterIdx)] !== undefined) {
+        return parseInt(item.chapters[String(chapterIdx)]) || 0;
+    }
+    // 兼容旧数据：仅当章节号吻合时才复用顶层 line
+    if (parseInt(item.chapterIdx) === chapterIdx) {
         return parseInt(item.line) || 0;
     }
     return 0;
@@ -197,4 +221,35 @@ function deleteRecord(currentUrl, progressStore) {
     if (currentUrl === "") return false;
     delete progressStore[currentUrl];
     return writeState("progress", JSON.stringify(progressStore));
+}
+
+// 重命名书籍时把进度与书签迁移到新路径键上，并清理旧键。
+// 不迁移会导致「改名后进度归零、书签丢失」。
+function renameRecord(oldUrl, newUrl, progressStore, bookmarksStore) {
+    if (oldUrl === "" || newUrl === "" || oldUrl === newUrl) return false;
+    var moved = false;
+    if (progressStore[oldUrl] !== undefined) {
+        var rec = progressStore[oldUrl];
+        rec.file = newUrl;
+        progressStore[newUrl] = rec;
+        delete progressStore[oldUrl];
+        moved = true;
+    }
+    if (bookmarksStore && bookmarksStore[oldUrl] !== undefined) {
+        var items = bookmarksStore[oldUrl] || [];
+        for (var i = 0; i < items.length; i++) items[i].file = newUrl;
+        bookmarksStore[newUrl] = items;
+        delete bookmarksStore[oldUrl];
+        moved = true;
+    }
+    return moved;
+}
+
+// 删除文件时同时清理其进度与书签，避免状态文件持续膨胀
+function purgeRecord(url, progressStore, bookmarksStore) {
+    if (url === "") return false;
+    var removed = false;
+    if (progressStore[url] !== undefined) { delete progressStore[url]; removed = true; }
+    if (bookmarksStore && bookmarksStore[url] !== undefined) { delete bookmarksStore[url]; removed = true; }
+    return removed;
 }

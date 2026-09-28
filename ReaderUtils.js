@@ -217,11 +217,15 @@ function getPageText(lines, currentLine, linesPerPage) {
 }
 
 // ====== 章节标题识别 ======
-// 共享正则，同时用于章节边界扫描和章节列表构建
-var _chapterRegex = /^(第[一二三四五六七八九十百千零\d]+[章节回集卷部篇]|Chapter\s+\d+|CHAPTER\s+\d+|Part\s+\d+|PART\s+\d+|Volume\s+\d+|VOLUME\s+\d+|Vol\.?\s*\d+|Section\s+\d+|SECTION\s+\d+|Act\s+\d+|ACT\s+\d+|Book\s+\d+|BOOK\s+\d+)/;
+// 正则源串。当前无 /g 标志，test() 不会产生 lastIndex 残留，
+// 但把内部单例直接交给调用方仍是隐患：一旦有人加 /g 或 /y，
+// test() 就会带状态，出现「隔行漏判章节」的诡异现象。
+// 因此 getChapterRegex() 返回独立副本而非共享对象。
+var _chapterRegexSource = "^(第[一二三四五六七八九十百千零\\d]+[章节回集卷部篇]|Chapter\\s+\\d+|CHAPTER\\s+\\d+|Part\\s+\\d+|PART\\s+\\d+|Volume\\s+\\d+|VOLUME\\s+\\d+|Vol\\.?\\s*\\d+|Section\\s+\\d+|SECTION\\s+\\d+|Act\\s+\\d+|ACT\\s+\\d+|Book\\s+\\d+|BOOK\\s+\\d+)";
+var _chapterRegex = new RegExp(_chapterRegexSource);
 
 function getChapterRegex() {
-    return _chapterRegex;
+    return new RegExp(_chapterRegexSource);
 }
 
 // ====== 内容处理（视觉宽度感知 + 单词边界保护） ======
