@@ -129,6 +129,8 @@ Rectangle {
     property bool folderScanAvailable: false
     property var uploaderController: (typeof shellPluginController !== "undefined") ? shellPluginController : null
     property bool uploaderStarted: false
+    property bool uploaderStarting: false
+    property bool _readLogPending: false
     property string uploaderStatus: "上传服务未启动"
     property string uploaderAddress: ""
     property string uploaderOutput: ""
@@ -355,21 +357,32 @@ Rectangle {
         saveSettings();
     }
 
-    function _readLog(path) {
+    // 修复：原实现用同步 XHR（xhr.open(..., false)）读取日志，且由 500ms
+    // 定时器驱动，每次都会阻塞 QML 渲染线程，且 HEAD + GET 两次请求。
+    // 现改为单次异步 GET，并用 _readLogPending 防止请求重入。
+    function _readLog(path, callback) {
+        if (_readLogPending) return;
+        _readLogPending = true;
         try {
-            // 先检查文件是否存在且非空
-            var checkXhr = new XMLHttpRequest();
-            checkXhr.open("HEAD", "file://" + path, false);
-            checkXhr.send();
-            if (checkXhr.status !== 200 && checkXhr.status !== 0) return "";
-
             var xhr = new XMLHttpRequest();
-            xhr.open("GET", "file://" + path, false);
+            xhr.open("GET", "file://" + path, true);
+            xhr.onreadystatechange = function () {
+                if (xhr.readyState !== XMLHttpRequest.DONE) return;
+                _readLogPending = false;
+                var text = "";
+                if (xhr.status === 200 || xhr.status === 0)
+                    text = xhr.responseText || "";
+                callback(text);
+            };
+            xhr.onerror = function () {
+                _readLogPending = false;
+                callback("");
+            };
             xhr.send();
-            if (xhr.status === 200 || xhr.status === 0)
-                return xhr.responseText || "";
-        } catch (e) {}
-        return "";
+        } catch (e) {
+            _readLogPending = false;
+            callback("");
+        }
     }
 
     function startUploaderService() {
@@ -378,28 +391,44 @@ Rectangle {
         uploaderController = (typeof shellPluginController !== "undefined") ? shellPluginController : null;
         if (!uploaderController) {
             uploaderStatus = "上传服务未加载";
+            uploaderStarted = false;
             return;
         }
 
-        uploaderStarted = true;
+        // 修复：原先在发出启动命令「之前」就置 uploaderStarted = true，
+        // 一旦后端启动失败（无可用环境/端口被占），按钮会停留在
+        // 「取消上传」状态，用户必须先点一次取消才能重试。
+        // 现改为「启动中」独立状态，仅在确认端口就绪后才置为已启动。
+        uploaderStarting = true;
+        uploaderStarted = false;
         uploaderStatus = "上传服务启动中";
         uploaderAddress = "";
         _ipQueried = false;
         _uploadRetry = 0;
         var pluginDir = Qt.resolvedUrl(".").replace("file://", "");
-        uploaderController.sendCommand("rm -f /tmp/novel-uploader.log; sh " + shellEscape(pluginDir + "/start-uploader.sh"));
+        try {
+            uploaderController.sendCommand("rm -f /tmp/novel-uploader.log; sh " + shellEscape(pluginDir + "/start-uploader.sh"));
+        } catch (e) {
+            uploaderStarting = false;
+            uploaderStatus = "启动命令执行失败";
+            return;
+        }
         uploaderOutputTimer.start();
     }
 
     function stopUploaderService() {
-        if (!uploaderStarted)
+        if (!uploaderStarted && !uploaderStarting)
             return;
         if (uploaderController) {
-            uploaderController.sendCommand("fuser -k 8088/tcp 2>/dev/null || pkill -f 'novel-httpd' 2>/dev/null; pkill -f 'node.*server.js' 2>/dev/null; pkill -f 'python3.*server.py' 2>/dev/null; pkill -f 'upload_server' 2>/dev/null; echo ''");
+            try {
+                uploaderController.sendCommand("fuser -k 8088/tcp 2>/dev/null || pkill -f 'novel-httpd' 2>/dev/null; pkill -f 'node.*server.js' 2>/dev/null; pkill -f 'python3.*server.py' 2>/dev/null; pkill -f 'upload_server' 2>/dev/null; echo ''");
+            } catch (e) {}
         }
         uploaderStarted = false;
+        uploaderStarting = false;
         uploaderStatus = "上传服务已停止";
         uploaderAddress = "";
+        _readLogPending = false;
         uploaderOutputTimer.stop();
     }
 
@@ -425,52 +454,87 @@ Rectangle {
     }
 
     function refreshUploaderOutput() {
-        if (!uploaderStarted || uploaderAddress !== "")
+        if ((!uploaderStarted && !uploaderStarting) || uploaderAddress !== "")
             return;
 
         uploaderController = (typeof shellPluginController !== "undefined") ? shellPluginController : null;
         if (!uploaderController)
             return;
 
-        var log = _readLog("/tmp/novel-uploader.log");
-        if (log !== "") {
-            var url = ReaderUtils.getUploaderUrl(log);
-            if (url) {
-                uploaderAddress = url;
-                uploaderStatus = "上传服务已启动";
-                _uploadRetry = 0;
-                return;
+        _readLog("/tmp/novel-uploader.log", function (log) {
+            applyUploaderLog(log);
+        });
+    }
+
+    // 解析启动日志并更新上传服务状态
+    function applyUploaderLog(log) {
+        if (log === "") {
+            _uploadRetry++;
+            if (_uploadRetry > 40) {
+                uploaderStarting = false;
+                uploaderStatus = "上传服务未启动或日志为空";
+                uploaderOutputTimer.stop();
             }
-            var ips = log.match(/(\d+\.\d+\.\d+\.\d+)/g);
-            if (ips) {
-                for (var i = ips.length - 1; i >= 0; i--) {
-                    if (ips[i] !== "127.0.0.1" && ips[i].indexOf("169.254.") !== 0 && ips[i] !== "0.0.0.0") {
-                        uploaderAddress = "http://" + ips[i] + ":8088";
-                        uploaderStatus = "上传服务已启动";
-                        _uploadRetry = 0;
-                        return;
-                    }
+            return;
+        }
+
+        var url = ReaderUtils.getUploaderUrl(log);
+        if (url) {
+            uploaderAddress = url;
+            uploaderStatus = "上传服务已启动";
+            uploaderStarted = true;
+            uploaderStarting = false;
+            _uploadRetry = 0;
+            return;
+        }
+
+        var ips = log.match(/(\d+\.\d+\.\d+\.\d+)/g);
+        if (ips) {
+            for (var i = ips.length - 1; i >= 0; i--) {
+                if (ips[i] !== "127.0.0.1" && ips[i].indexOf("169.254.") !== 0 && ips[i] !== "0.0.0.0") {
+                    uploaderAddress = "http://" + ips[i] + ":8088";
+                    uploaderStatus = "上传服务已启动";
+                    uploaderStarted = true;
+                    uploaderStarting = false;
+                    _uploadRetry = 0;
+                    return;
                 }
             }
-            if (log.indexOf("ERROR:") >= 0) {
-                if (log.indexOf("未找到") >= 0) {
-                    uploaderStatus = "缺少运行环境，请 SSH 安装 node: opkg install node";
-                } else if (log.indexOf("端口") >= 0 || log.indexOf("port") >= 0) {
-                    uploaderStatus = "端口 8088 被占用";
-                } else {
-                    uploaderStatus = "上传服务启动失败";
-                }
-                return;
-            }
-            if (log.indexOf("Address already in use") >= 0 || log.indexOf("EADDRINUSE") >= 0) {
+        }
+
+        if (log.indexOf("ERROR:") >= 0) {
+            // 启动失败：立即复位，让用户可以再次点击启动重试
+            uploaderStarting = false;
+            uploaderStarted = false;
+            uploaderOutputTimer.stop();
+            if (log.indexOf("busybox 存在但未编译 httpd applet") >= 0) {
+                uploaderStatus = "busybox 缺少 httpd 组件，请用 SSH/SFTP 上传";
+            } else if (log.indexOf("未找到可用") >= 0 || log.indexOf("未找到") >= 0) {
+                uploaderStatus = "缺少运行环境，请 SSH 安装 node: opkg install node";
+            } else if (log.indexOf("端口") >= 0 || log.indexOf("port") >= 0) {
                 uploaderStatus = "端口 8088 被占用";
-                return;
+            } else {
+                uploaderStatus = "上传服务启动失败";
             }
+            var hint = log.match(/HINT:.*/);
+            if (hint) uploaderStatus = uploaderStatus + "（" + hint[0].replace("HINT: ", "") + "）";
+            return;
+        }
+
+        if (log.indexOf("Address already in use") >= 0 || log.indexOf("EADDRINUSE") >= 0) {
+            uploaderStarting = false;
+            uploaderStarted = false;
+            uploaderOutputTimer.stop();
+            uploaderStatus = "端口 8088 被占用";
+            return;
         }
 
         _uploadRetry++;
         if (_uploadRetry > 40) {
-            uploaderStatus = log === "" ? "上传服务未启动或日志为空" : "上传服务启动超时，请检查网络";
+            uploaderStarting = false;
+            uploaderStarted = false;
+            uploaderStatus = "上传服务启动超时，请检查网络";
+            uploaderOutputTimer.stop();
         }
     }
     function readState(key, fallbackValue) {
@@ -601,6 +665,11 @@ Rectangle {
                 if (typeof shellPluginController !== "undefined" && shellPluginController)
                     shellPluginController.sendCommand("mv " + shellEscape(oldPath) + " " + shellEscape(newPath));
             } catch(e) {}
+            // 修复：进度与书签都以 file://路径 为键，重命名后若不迁移，
+            // 旧键会变成孤儿 —— 用户视角是「改名后从头开始读、书签全丢」。
+            Storage.renameRecord(addFilePrefix(oldPath), addFilePrefix(newPath), progressStore, bookmarksStore);
+            writeState("progress", JSON.stringify(progressStore));
+            writeState("bookmarks", JSON.stringify(bookmarksStore));
             // 刷新书架
             Qt.callLater(function() {
                 if (bookFolderModel) {
@@ -623,7 +692,12 @@ Rectangle {
             if (typeof shellPluginController !== "undefined" && shellPluginController)
                 shellPluginController.sendCommand("rm " + shellEscape(oldPath));
         } catch(e) {}
-        if (item.file) Storage.deleteRecord(item.file, progressStore);
+        if (item.file) {
+            // 修复：删除文件时一并清理书签，避免状态文件留下孤儿键
+            Storage.purgeRecord(item.file, progressStore, bookmarksStore);
+            writeState("progress", JSON.stringify(progressStore));
+            writeState("bookmarks", JSON.stringify(bookmarksStore));
+        }
         Qt.callLater(function() {
             if (bookFolderModel) {
                 try { bookFolderModel.destroy(); } catch(e) {}
@@ -1377,19 +1451,24 @@ Rectangle {
                     width: (parent.width - 6) / 2
                     height: 24
                     radius: 3
-                    color: uploaderStarted ? "#FFEBEE" : "#E3F2FD"
-                    border.color: uploaderStarted ? "#EF9A9A" : "#BBDEFB"
+                    // 启动中显示中性色，已启动显示「取消」，失败后自动回到「启动」可重试
+                    color: (uploaderStarted || uploaderStarting) ? "#FFEBEE" : "#E3F2FD"
+                    border.color: (uploaderStarted || uploaderStarting) ? "#EF9A9A" : "#BBDEFB"
                     Text {
                         anchors.centerIn: parent
-                        text: uploaderStarted ? "取消上传" : "启动上传"
+                        text: uploaderStarting ? "启动中…"
+                                               : (uploaderStarted ? "取消上传" : "启动上传")
                         font.pixelSize: 11
-                        color: uploaderStarted ? "#D32F2F" : "#1565C0"
+                        color: uploaderStarting ? "#8D6E63"
+                                                : (uploaderStarted ? "#D32F2F" : "#1565C0")
                         font.family: "Microsoft YaHei"
                     }
                     MouseArea {
                         anchors.fill: parent
                         onClicked: {
-                            if (uploaderStarted) {
+                            if (uploaderStarting) {
+                                stopUploaderService();
+                            } else if (uploaderStarted) {
                                 stopUploaderService();
                             } else {
                                 uploaderStarted = false;
