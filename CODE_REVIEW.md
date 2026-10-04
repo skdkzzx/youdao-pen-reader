@@ -324,16 +324,115 @@ CGI 环境变量（`REQUEST_METHOD` / `CONTENT_LENGTH`）执行真实
 
 ---
 
-## 六、遗留建议（未在本次修复范围）
+## 六、第二轮审查（v1.3.1）
+
+第一轮修复上线后继续复查，发现以下问题。
+
+| 编号 | 严重度 | 位置 | 问题 | 状态 |
+|------|--------|------|------|------|
+| P1 | 中 | `Storage.js` | 阅读时长被定时保存抹掉 | 已修复 |
+| P2 | 中 | `main.qml` | `returnToShelf` 不重扫目录，书架显示陈旧数据 | 已修复 |
+| P3 | 中 | `main.qml` | 停在书架页时上传的文件永不出现 | 已修复 |
+| P4 | 低 | `ReaderUtils.js` | 书架上限 50 本且静默丢弃 | 已修复 |
+| P5 | 低 | `main.qml` | 两个定时器功能重叠，写入频率过高 | 已修复 |
+| P6 | 低 | `main.qml` | `lastFilePath` 只写不读 | 已清理 |
+
+### P1 —— 阅读时长被定时保存抹掉【已复现】
+
+`updateProgressMemory` 会**整体重建**进度记录对象，但字段列表中
+没有 `readingTime`：
+
+```js
+progressStore[currentUrl] = {
+    file, name, line, totalLines, chapterIdx, chapters, bookPercent, timestamp
+};   // ← readingTime 不在其中
+```
+
+而 `readingTimer` 每秒只累加内存中的 `readingTimeData`，
+真正回写到 `progressStore` 的只有 `saveProgress` / `flushProgress`
+两条路径。`periodicSaveTimer`（阅读时每 5 秒）走的却是
+`updateProgressMemory`：
+
+```
+① flushProgress 后  readingTime = 3600
+② periodicSave 后  readingTime = undefined   ← 丢了
+③ 再轮一次         readingTime = undefined   ← 又丢
+```
+
+**后果**：阅读时长显示在 `flushProgress` 与定时保存之间反复跳变。
+
+> 附带说明：第一轮我给 `updateProgressMemory` 补 `chapters` 时
+> 注意到了 `prev`，却漏看了同样需要沿用旧值的 `readingTime` ——
+> 这个 bug 有一半是我那轮改动的遗留，属应当自我修正的部分。
+
+**修复**：保留既有 `readingTime`，新增可选参数供显式覆盖；
+统一 7 处调用点传入 `readingTimeData[currentUrl]`。
+
+### P2 —— 从阅读器返回书架不重扫目录
+
+```js
+function returnToShelf() {
+    navigateRoot();
+    navigateTo("shelf");
+    loadBookList();   // ← 只读缓存的 bookFolderModel，没有重扫
+}
+```
+
+对比 `openShelf()`（进书架）会 `destroy` 模型后重扫。
+两条入口行为不一致：外部新增/删除的文件，
+只有走 `openShelf` 才可见。
+
+**修复**：抽出 `refreshShelf()` 统一做「重扫 + 刷新」，
+两个入口都调用。
+
+### P3 —— 停在书架页时上传的文件永不出现
+
+上传服务运行期间用户在书架页等待，书架无任何重扫机制，
+必须手动退出再进。**修复**：新增 `shelfAutoRefreshTimer`
+（8 秒，仅书架页可见时运行）。
+
+### P4 —— 书架静默截断
+
+上限 50 本，超出部分直接丢弃且无提示，用户会误以为小说没被识别。
+**修复**：上限提至 200，记录截断前总数，
+标题显示「书架 (200/共 250 本)」。
+
+### P5 —— 定时器功能重叠
+
+`periodicSaveTimer`（5s）与 `progressFlushTimer`（3s，翻页后 restart）
+都执行 `flushProgressStore` → 全量双写。阅读时实测平均
+**每 2~3 秒**重写一次状态文件（每次 2 条 shell 命令 + 1 次同步 XHR）。
+**修复**：`progressFlushTimer` 间隔改为 5s 与兜底保存错开。
+
+### P6 —— `lastFilePath` 只写不读
+
+写入 settings 但从未用于恢复阅读。**处理**：停止持久化，
+保留旧字段读取以兼容既有状态文件。
+
+### 已核查但不成立的项
+
+- **字号变更导致进度漂移** —— 我一度误判，
+  实际 `setFontSize` 已正确按比例换算（`ratio → 新行数`）并 `clamp`。
+  教训：先读完实现再下结论。
+- **进度键与书签键编码不一致** —— 核查后确认两者都用未编码形式
+  （`file://` + 原始路径），`encodePath` 只用于实际加载请求，一致 ✓。
+
+---
+
+## 七、遗留建议（未修复）
 
 1. **弃用 shell CGI**：在 BusyBox 下用 shell 解析 URL 编码的二进制数据
    属系统性风险。新版前端已改为直接 POST 二进制，shell CGI 现仅作为
    旧客户端的兜底；若目标是彻底规避，可让 busybox httpd 只做静态服务，
    上传交由 SSH/SFTP。
-2. **`saveSettings()` 在 `onDestruction` 中可能失效**：组件销毁阶段
+2. **`flushToFile` 的"校验"形同虚设**：`sendCommand` 是异步无回调的，
+   紧随其后的同步 XHR 读取无法保证读到本次写入的内容；
+   而校验条件只有 `verifyText.length > 2`，只要文件里有旧数据就恒为真。
+   它既不能发现失败，又可能在首次写入时误报失败。
+   需要真正的写确认机制（如命令写入结果文件后轮询）。
+3. **`saveSettings()` 在 `onDestruction` 中可能失效**：组件销毁阶段
    异步 `sendCommand` 是否还能送达未经真机验证。建议把设置写入提前到
    变更时立即执行，而非依赖销毁回调。
-3. **`buildBookList` 上限 50 本**：超出部分静默丢弃，建议提示用户。
-4. **阅读进度未按字号缩放归一化**：改字号后 `currentLine` 语义变化，
-   可能产生位置漂移（`bookmarksStore` 已保存 `linesTotal` 供换算，
-   进度表未利用该字段）。
+4. **`readState` 的 fallback 未被使用时的语义**：`dataCache` 为空对象
+   时 `flushToFile` 直接返回 false，首次写入被跳过（属有意设计，
+   但错误路径没有区分"无数据"与"写入失败"）。
