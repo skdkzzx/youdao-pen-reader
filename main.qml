@@ -5,6 +5,7 @@ import "ReaderUtils.js" as ReaderUtils
 import "Encoding.js" as Encoding
 import "ReadingStats.js" as Stats
 import "Search.js" as Search
+import "BookList.js" as BookList
 
 Rectangle {
     id: root
@@ -152,6 +153,11 @@ Rectangle {
     property bool keyboardPending: false
     property var bookList: []
     property int bookListTotal: 0   // 书架截断前的实际总数
+    // ====== 书架视图（排序 / 筛选）======
+    property string shelfQuery: ""
+    property string shelfSort: BookList.SORT_RECENT
+    property string shelfFilter: BookList.FILTER_ALL
+    property var shelfSource: []     // 未过滤的完整列表
     property var bookmarkList: []
     property var progressStore: ({})
     property var bookmarksStore: ({})
@@ -695,6 +701,8 @@ Rectangle {
             themeName: themeName,
             autoScrollSeconds: autoScrollSeconds,
             readerMargin: readerMargin,
+            shelfSort: shelfSort,
+            shelfFilter: shelfFilter,
             scrollMode: scrollMode,
             tripleTapHome: tripleTapHome,
             chapterNameMode: chapterNameMode
@@ -724,6 +732,11 @@ Rectangle {
         }
         tripleTapHome = settings.tripleTapHome === true;
         chapterNameMode = settings.chapterNameMode || "scroll";
+        // 书架视图偏好（旧状态文件无此字段时用默认值）
+        shelfSort = BookList.isValidSortMode(settings.shelfSort)
+                    ? settings.shelfSort : BookList.SORT_RECENT;
+        shelfFilter = BookList.isValidFilterMode(settings.shelfFilter)
+                      ? settings.shelfFilter : BookList.FILTER_ALL;
         // 页边距（新增项，旧状态文件无此字段时用默认值）
         var m = parseInt(settings.readerMargin);
         readerMargin = (isNaN(m) ? 7 : Math.max(MARGIN_MIN, Math.min(MARGIN_MAX, m)));
@@ -731,8 +744,43 @@ Rectangle {
     }
 
     function loadBookList() {
-        bookList = ReaderUtils.buildBookList(folderScanAvailable, bookFolderModel, progressStore, defaultBookFolder);
+        shelfSource = ReaderUtils.buildBookList(folderScanAvailable, bookFolderModel, progressStore, defaultBookFolder);
         bookListTotal = ReaderUtils.getBookListTotal();
+        applyShelfView();
+    }
+
+    // 应用排序与筛选，生成最终展示列表
+    function applyShelfView() {
+        bookList = BookList.applyView(shelfSource, shelfQuery, shelfFilter, shelfSort);
+    }
+
+    function setShelfSort(mode) {
+        shelfSort = mode;
+        applyShelfView();
+    }
+
+    function setShelfFilter(mode) {
+        shelfFilter = mode;
+        applyShelfView();
+    }
+
+    function setShelfQuery(q) {
+        shelfQuery = q || "";
+        applyShelfView();
+    }
+
+    // 各筛选条件下的书籍数量（供标签显示）
+    function shelfFilterCounts() {
+        return BookList.statusCounts(shelfSource);
+    }
+
+    function shelfFilterLabel(mode) {
+        var c = shelfFilterCounts();
+        if (mode === BookList.FILTER_ALL) return "全部 " + c.all;
+        if (mode === BookList.FILTER_UNREAD) return "未读 " + c.unread;
+        if (mode === BookList.FILTER_READING) return "在读 " + c.reading;
+        if (mode === BookList.FILTER_DONE) return "读完 " + c.done;
+        return mode;
     }
 
     // 书架长按菜单：重命名
@@ -2039,6 +2087,128 @@ Rectangle {
             anchors.margins: 6
             spacing: 4
 
+            // 搜索框（书名过滤）
+            Rectangle {
+                width: parent.width
+                height: 26
+                radius: 4
+                color: "#FFFFFF"
+                border.color: "#CCCCCC"
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - 40
+                    text: shelfQuery === "" ? "点击搜索书名…" : shelfQuery
+                    font.pixelSize: 11
+                    color: shelfQuery === "" ? "#AAAAAA" : "#333333"
+                    elide: Text.ElideRight
+                    font.family: "Microsoft YaHei"
+                }
+
+                Rectangle {
+                    visible: shelfQuery !== ""
+                    anchors.right: parent.right
+                    anchors.rightMargin: 4
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: 22; height: 20; radius: 3
+                    color: "#F0F0F0"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "×"
+                        font.pixelSize: 14
+                        color: "#888"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: setShelfQuery("")
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    z: -1
+                    onClicked: {
+                        showKeyboard(shelfQuery, function (text) {
+                            setShelfQuery(text);
+                        });
+                    }
+                }
+            }
+
+            // 状态筛选标签
+            Row {
+                width: parent.width
+                height: 22
+                spacing: 4
+
+                Repeater {
+                    model: BookList.FILTER_MODES
+                    delegate: Rectangle {
+                        width: (parent.width - 12) / 4
+                        height: 22
+                        radius: 3
+                        color: shelfFilter === modelData.value ? "#2f7dcc" : "#EEEEEE"
+                        Text {
+                            anchors.centerIn: parent
+                            text: shelfFilterLabel(modelData.value)
+                            font.pixelSize: 9
+                            color: shelfFilter === modelData.value ? "#FFFFFF" : "#666666"
+                            elide: Text.ElideRight
+                            width: parent.width - 2
+                            horizontalAlignment: Text.AlignHCenter
+                            font.family: "Microsoft YaHei"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: setShelfFilter(modelData.value)
+                        }
+                    }
+                }
+            }
+
+            // 排序方式
+            Row {
+                width: parent.width
+                height: 20
+                spacing: 4
+
+                Text {
+                    width: 30; height: 20
+                    text: "排序"
+                    font.pixelSize: 9
+                    color: "#999"
+                    verticalAlignment: Text.AlignVCenter
+                    font.family: "Microsoft YaHei"
+                }
+
+                Repeater {
+                    model: BookList.SORT_MODES
+                    delegate: Rectangle {
+                        width: (parent.width - 34 - 16) / 5
+                        height: 20
+                        radius: 3
+                        color: shelfSort === modelData.value ? "#8D6E63" : "#F0F0F0"
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData.label
+                            font.pixelSize: 8
+                            color: shelfSort === modelData.value ? "#FFFFFF" : "#777777"
+                            elide: Text.ElideRight
+                            width: parent.width - 2
+                            horizontalAlignment: Text.AlignHCenter
+                            font.family: "Microsoft YaHei"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: setShelfSort(modelData.value)
+                        }
+                    }
+                }
+            }
+
             Row {
                 width: parent.width
                 height: 24
@@ -2099,7 +2269,8 @@ Rectangle {
 
             ListView {
                 width: parent.width
-                height: parent.height - 28
+                // 顶栏24 + 搜索26 + 筛选22 + 排序20 + 间距与底部行28
+                height: parent.height - 140
                 clip: true
                 spacing: 3
                 model: bookList
@@ -2145,7 +2316,7 @@ Rectangle {
                             font.family: "Microsoft YaHei"
                         }
                         Text {
-                            text: modelData.progress + "%"
+                            text: (modelData.progress || 0) + "%"
                             font.pixelSize: 9
                             color: "#888"
                             anchors.verticalCenter: parent.verticalCenter
@@ -2157,7 +2328,9 @@ Rectangle {
                 Text {
                     anchors.centerIn: parent
                     visible: bookList.length === 0
-                    text: "暂无小说\n请将 txt 放到 " + defaultBookFolder
+                    text: shelfSource.length > 0
+                          ? "没有符合条件的书籍"
+                          : ("暂无小说\n请将 txt 放到 " + defaultBookFolder)
                     font.pixelSize: 11
                     color: textColor
                     opacity: 0.5
