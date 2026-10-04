@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>词典笔界面模拟器 · 电子书阅读器</title>
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
 
@@ -28,6 +28,16 @@
     <div class="ctrl" onclick="openPanel('search')">全文搜索</div>
     <div class="ctrl" onclick="openPanel('bookmarks')">书签</div>
     <div class="ctrl" onclick="closePanel()">关闭面板</div>
+  </div>
+
+  <h3>主题预览（10 个，含 3 个深色）</h3>
+  <div class="ctrl-row" id="themeRow"></div>
+
+  <h3>夜间模式</h3>
+  <div class="ctrl-row">
+    <div class="ctrl" id="nightToggle" onclick="toggleNight()">夜间自动切换：关</div>
+    <div class="ctrl" data-night-start onclick="setNightHour('start')">夜间起 20:00</div>
+    <div class="ctrl" data-night-end onclick="setNightHour('end')">夜间止 7:00</div>
   </div>
 
   <h3>翻页模拟（阅读器页生效）</h3>
@@ -69,6 +79,6 @@
   </div>
 </div>
 
-<script src="app.js?v=4"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

@@ -9,6 +9,21 @@
 
 const SW = 320, SH = 170;
 
+// ===== 主题（与 ReaderUtils._themes 保持一致）=====
+const THEMES = {
+  '默认': { bg:'#FFFBF0', fg:'#333333', card:'#F8F4EC', border:'#E0D8C8', sub:'#888888', accent:'#2f7dcc', dark:false },
+  '白色': { bg:'#FFFFFF', fg:'#333333', card:'#F5F5F5', border:'#E0E0E0', sub:'#888888', accent:'#2f7dcc', dark:false },
+  '米黄': { bg:'#F5EEDC', fg:'#4A4034', card:'#EDE4CE', border:'#DCCFB4', sub:'#8A7D68', accent:'#8B6F47', dark:false },
+  '黄色': { bg:'#FFF8E1', fg:'#5D4037', card:'#FFF3CD', border:'#F0E0B0', sub:'#8D6E63', accent:'#E65100', dark:false },
+  '绿色': { bg:'#E8F5E9', fg:'#2E7D32', card:'#DFF0E0', border:'#C8E6C9', sub:'#558B2F', accent:'#2E7D32', dark:false },
+  '蓝色': { bg:'#E3F2FD', fg:'#1565C0', card:'#D6EAFA', border:'#BBDEFB', sub:'#5C8FC4', accent:'#1565C0', dark:false },
+  '粉色': { bg:'#FCE4EC', fg:'#880E4F', card:'#F8D7E3', border:'#F0C8D8', sub:'#AD5C7B', accent:'#C2185B', dark:false },
+  '黑色': { bg:'#263238', fg:'#ECEFF1', card:'#2F3A42', border:'#3E4C56', sub:'#90A4AE', accent:'#4FC3F7', dark:true },
+  '深灰': { bg:'#1C1C1E', fg:'#D0D0D2', card:'#2C2C2E', border:'#3A3A3C', sub:'#8E8E93', accent:'#5AC8FA', dark:true },
+  '暗黑': { bg:'#000000', fg:'#C8C8C8', card:'#141414', border:'#2A2A2A', sub:'#707070', accent:'#64B5F6', dark:true },
+};
+function T() { return THEMES[CFG.theme] || THEMES['默认']; }
+
 // ===== 与 main.qml 保持一致的常量 =====
 const CFG = {
   readerMargin: 7,
@@ -18,6 +33,9 @@ const CFG = {
   shelfSort: 'recent',
   shelfFilter: 'all',
   theme: '默认',
+  nightAuto: false,
+  nightStart: 20,
+  nightEnd: 7,
 };
 
 // ===== 模拟数据 =====
@@ -110,8 +128,21 @@ function statusCounts() {
 }
 
 // ===== 页面渲染 =====
+// 把当前主题写入 CSS 变量，使设备外壳内的所有元素自动跟随
+function applyThemeVars() {
+  const t = T();
+  const root = document.documentElement;
+  root.style.setProperty('--bg', t.bg);
+  root.style.setProperty('--fg', t.fg);
+  root.style.setProperty('--card', t.card);
+  root.style.setProperty('--border', t.border);
+  root.style.setProperty('--sub', t.sub);
+  root.style.setProperty('--accent', t.accent);
+}
+
 function render() {
   const el = document.getElementById('screen');
+  applyThemeVars();
   let html = '';
 
   if (state.panel === 'menu')          html = viewMenu();
@@ -147,7 +178,7 @@ function viewReader() {
       ${page.map(l => `<div>${l || '&nbsp;'}</div>`).join('')}
     </div>
     <div style="height:${STATUS_H}px;flex-shrink:0;display:flex;align-items:center;
-                justify-content:space-between;font-size:8.5px;color:#999;
+                justify-content:space-between;font-size:8.5px;color:var(--sub);
                 border-top:1px solid rgba(0,0,0,.05);margin:0 -${m}px">
       <span style="padding-left:${m}px">全书 ${bookPct}%　剩余 ${state.readingSpeed > 0 ? '约2小时' : '约2小时'}</span>
       <span style="padding-right:${m}px">${curPage}/${totalPages} 页</span>
@@ -165,7 +196,7 @@ function viewMenu() {
       ${btn('跳转')}${btn('添加书签')}${btn('书签')}
       ${btn('上一章')}${btn('滚动')}${btn('下一章')}
     </div>
-    <div style="margin-top:4px;font-size:9px;color:#888">
+    <div style="margin-top:4px;font-size:9px;color:var(--sub)">
       进度: ${Math.round(state.line / TEXT_LINES.length * 100)}%　阅读: 1小时30分
     </div>
     <div style="height:10px;border-radius:5px;background:#ddd;margin-top:4px;flex-shrink:0">
@@ -183,7 +214,7 @@ function viewShelf() {
   const sorts = [['recent','最近'],['name','书名'],['progress','进度'],['size','大小'],['unread','未读']];
 
   // 紧凑布局：搜索框与筛选合并为一行，排序折叠进按钮弹出
-  const TOP = 24, CHIPS = 22, HINT = 12, BOTTOM = 28;
+  const TOP = 24, CHIPS = 22, HINT = 12, BOTTOM = 28, LIST_ROW = 24;
   const chromeH = TOP + CHIPS + HINT + BOTTOM + 3 * 4;
   const listH = SH - 12 - chromeH;
 
@@ -200,32 +231,32 @@ function viewShelf() {
            onclick="promptSearch()">搜索</div>
     </div>
 
-    <div class="chips" style="height:${SEARCH}px;align-items:center;gap:3px">
-      <div class="chip" style="width:34px;height:${SEARCH}px;background:${state.filter==='all'?'var(--accent)':'#eee'};
+    <div class="chips" style="height:${CHIPS}px;align-items:center;gap:3px">
+      <div class="chip" style="width:34px;height:${CHIPS}px;background:${state.filter==='all'?'var(--accent)':'#eee'};
            color:${state.filter==='all'?'#fff':'#666'}" onclick="setFilter('all')">
         ${state.shelfQuery ? '✕' : c.all}
       </div>
       ${filters.slice(1).map(([k,label]) =>
-        `<div class="chip ${state.filter===k?'on':''}" style="flex:1;height:${SEARCH}px"
+        `<div class="chip ${state.filter===k?'on':''}" style="flex:1;height:${CHIPS}px"
               onclick="setFilter('${k}')">${label}${c[k]}</div>`).join('')}
-      <div class="chip" style="width:34px;height:${SEARCH}px;background:#8D6E63;color:#fff"
+      <div class="chip" style="width:34px;height:${CHIPS}px;background:#8D6E63;color:#fff"
            onclick="cycleSort()">⇅</div>
     </div>
 
     <div class="list" style="height:${listH}px">
       ${list.length === 0
-        ? `<div style="text-align:center;color:#999;font-size:10px;padding-top:6px">
+        ? `<div style="text-align:center;color:var(--sub);font-size:10px;padding-top:6px">
              ${BOOKS.length ? '没有符合条件的书籍' : '暂无小说'}</div>`
         : list.map(b => `
-          <div class="row" style="height:${LIST_ROW}px;background:#F8F4EC;border:1px solid var(--border)"
+          <div class="row" style="height:${LIST_ROW}px;background:var(--card);border:1px solid var(--border)"
                onclick="openBook('${b.name}')">
             <span style="flex:1;font-size:10.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.name}</span>
-            <span style="font-size:8.5px;color:#888;flex-shrink:0">${b.progress}%</span>
+            <span style="font-size:8.5px;color:var(--sub);flex-shrink:0">${b.progress}%</span>
           </div>`).join('')}
     </div>
 
     <div style="height:${BOTTOM}px;flex-shrink:0;display:flex;align-items:center;
-                justify-content:space-between;font-size:9px;color:#999">
+                justify-content:space-between;font-size:9px;color:var(--sub)">
       <span>排序：${(sorts.find(x => x[0] === state.sort) || [,'最近'])[1]}</span>
       <span>${state.shelfQuery ? '筛选：“' + state.shelfQuery + '”' : ''}</span>
     </div>
@@ -262,12 +293,12 @@ function viewSearch() {
       <div class="chip" style="flex:1">整词匹配</div>
       <div class="chip" style="flex:1">区分大小写</div>
     </div>
-    <div style="font-size:10px;color:#888;flex-shrink:0">共 ${hits.length} 处匹配</div>
+    <div style="font-size:10px;color:var(--sub);flex-shrink:0">共 ${hits.length} 处匹配</div>
     <div class="list">
       ${hits.map(h => `
-        <div class="row" style="height:34px;background:#F5F5F5;border:1px solid #e0e0e0;
+        <div class="row" style="height:34px;background:var(--card);border:1px solid var(--border);
              flex-direction:column;align-items:flex-start;justify-content:center;gap:1px;padding:4px 6px">
-          <div style="font-size:9px;color:#999">第 ${h.ch} 章 · 第 ${h.line + 1} 行</div>
+          <div style="font-size:9px;color:var(--sub)">第 ${h.ch} 章 · 第 ${h.line + 1} 行</div>
           <div style="font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;width:100%">
             ${h.before}<span style="color:#D32F2F;font-weight:700">${h.match}</span>${h.after}
           </div>
@@ -288,10 +319,10 @@ function viewBookmarks() {
     <div style="height:1px;background:#eee;flex-shrink:0"></div>
     <div class="list">
       ${state.bookmarks.map((b, i) => `
-        <div class="row" style="height:${b.note ? 50 : 36}px;background:#F5F0E8;border:1px solid #ddd;
+        <div class="row" style="height:${b.note ? 50 : 36}px;background:var(--card);border:1px solid var(--border);
              flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;padding:4px 6px;position:relative">
           <div style="font-size:11px;color:#333">书签 ${i + 1} - 第${Math.floor(b.pct / 10) + 1}页</div>
-          <div style="font-size:9px;color:#888;width:210px;overflow:hidden;
+          <div style="font-size:9px;color:var(--sub);width:210px;overflow:hidden;
                       text-overflow:ellipsis;white-space:nowrap">${b.preview}</div>
           ${b.note ? `<div style="font-size:9px;color:#2E7D32;width:210px;overflow:hidden;
                        text-overflow:ellipsis;white-space:nowrap">备注：${b.note}</div>` : ''}
@@ -300,7 +331,7 @@ function viewBookmarks() {
                       display:flex;align-items:center;justify-content:center;font-size:9px;color:#E65100">备注</div>
           <div style="position:absolute;right:4px;top:50%;transform:translateY(-50%);
                       width:24px;height:20px;border-radius:3px;background:#eee;
-                      display:flex;align-items:center;justify-content:center;font-size:11px;color:#888">×</div>
+                      display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--sub)">×</div>
         </div>`).join('')}
     </div>
   </div>`;
@@ -324,13 +355,13 @@ function viewStats() {
     <div class="list">
       <div style="font-size:11px;font-weight:700;flex-shrink:0">阅读概况</div>
       ${rows.map(([k, v]) => `
-        <div class="row" style="height:26px;background:#F8F4EC;border:1px solid var(--border)">
-          <span style="flex:1;font-size:11px;color:#666">${k}</span>
+        <div class="row" style="height:26px;background:var(--card);border:1px solid var(--border)">
+          <span style="flex:1;font-size:11px;color:var(--sub)">${k}</span>
           <span style="font-size:11px;font-weight:700;color:#2f7dcc">${v}</span>
         </div>`).join('')}
       <div style="height:1px;background:#eee;margin:2px 0"></div>
       <div style="font-size:11px;font-weight:700">阅读速度</div>
-      <div style="font-size:10px;color:#888">
+      <div style="font-size:10px;color:var(--sub)">
         ${state.readingSpeed > 0 ? state.readingSpeed + ' 字/分（本机实测）'
                                  : '300 字/分（默认值，读满 1 分钟后自动校准）'}
       </div>
@@ -343,7 +374,7 @@ function viewHome() {
   return `
   <div class="page active">
     <div class="title" style="font-size:16px">电子书阅读器</div>
-    <div style="text-align:center;font-size:10px;color:#888">
+    <div style="text-align:center;font-size:10px;color:var(--sub)">
       小说请放到 /userdisk/Music/小说/
     </div>
     <div style="height:24px;border-radius:3px;background:#E3F2FD;border:1px solid #BBDEFB;
@@ -354,7 +385,7 @@ function viewHome() {
       <div class="btn" style="flex:1">启动上传</div>
       <div class="btn" style="flex:1" onclick="showPage('settings')">设置</div>
     </div>
-    <div class="row" style="height:34px;background:#F8F4EC;border:1px solid var(--border);
+    <div class="row" style="height:34px;background:var(--card);border:1px solid var(--border);
                 justify-content:center;font-size:13px;font-weight:700"
          onclick="showPage('shelf')">我的书架 (${BOOKS.length})</div>
   </div>`;
@@ -370,23 +401,23 @@ function viewSettings() {
       <div class="btn small primary">关于</div>
     </div>
     <div class="list">
-      <div style="font-size:9px;color:#888">小说目录：/userdisk/Music/小说/</div>
+      <div style="font-size:9px;color:var(--sub)">小说目录：/userdisk/Music/小说/</div>
       <div class="row" style="height:28px;background:#E3F2FD;border:1px solid #BBDEFB;
                   justify-content:center;font-size:11px;color:#1565C0"
            onclick="openPanel('stats')">阅读统计 ›</div>
       <div style="height:1px;background:#eee"></div>
       <div style="font-size:11px;font-weight:700">排版</div>
       <div style="display:flex;gap:4px;font-size:10px">
-        <span style="color:#666;width:46px">字号 ${CFG.baseFontSize}</span>
+        <span style="color:var(--sub);width:46px">字号 ${CFG.baseFontSize}</span>
         <div class="chip" style="width:30px">－</div>
         <div class="chip" style="width:30px">＋</div>
         <div class="chip" style="width:46px">重置</div>
       </div>
       <div style="display:flex;gap:4px;font-size:10px">
-        <span style="color:#666;width:46px">行距 ${CFG.lineSpacing}</span>
+        <span style="color:var(--sub);width:46px">行距 ${CFG.lineSpacing}</span>
         <div class="chip" style="width:30px">－</div>
         <div class="chip" style="width:30px">＋</div>
-        <span style="color:#666;width:46px">边距 ${CFG.readerMargin}</span>
+        <span style="color:var(--sub);width:46px">边距 ${CFG.readerMargin}</span>
         <div class="chip" style="width:30px">－</div>
         <div class="chip" style="width:30px">＋</div>
       </div>
@@ -415,6 +446,80 @@ function promptSearch() {
   const v = window.prompt('输入要搜索的内容', state.shelfQuery);
   if (v !== null) { state.shelfQuery = v; render(); }
 }
+// ===== 主题与夜间模式 =====
+function setTheme(name) {
+  CFG.theme = name;
+  CFG.nightAuto = false;    // 手动选主题即退出自动模式
+  render();
+  renderThemeButtons();
+}
+
+// 计算某小时是否落在夜间区间（支持跨零点，与 QML isNightHour 一致）
+function isNightHour(hour) {
+  const h = (hour === undefined) ? new Date().getHours() : hour;
+  if (CFG.nightStart === CFG.nightEnd) return false;
+  if (CFG.nightStart < CFG.nightEnd)
+    return h >= CFG.nightStart && h < CFG.nightEnd;
+  return h >= CFG.nightStart || h < CFG.nightEnd;
+}
+
+function toggleNight() {
+  CFG.nightAuto = !CFG.nightAuto;
+  if (CFG.nightAuto) {
+    const hour = new Date().getHours();
+    const night = isNightHour(hour);
+    CFG.theme = night ? '深灰' : '默认';
+    toast('当前 ' + hour + ' 时 → ' + (night ? '夜间' : '白天') + '，套用「' + CFG.theme + '」');
+  }
+  render();
+  renderThemeButtons();
+}
+
+function setNightHour(which) {
+  const cur = which === 'start' ? CFG.nightStart : CFG.nightEnd;
+  const v = window.prompt('输入小时 (0-23)', String(cur));
+  if (v === null) return;
+  const n = parseInt(v, 10);
+  if (isNaN(n) || n < 0 || n > 23) { toast('请输入 0-23 之间的整数'); return; }
+  if (which === 'start') CFG.nightStart = n; else CFG.nightEnd = n;
+  render();
+  renderThemeButtons();
+  toast('夜间时段 ' + CFG.nightStart + ':00 → ' + CFG.nightEnd + ':00');
+}
+
+// 渲染设备外部的主题选择按钮
+function renderThemeButtons() {
+  const row = document.getElementById('themeRow');
+  if (row) {
+    row.innerHTML = Object.keys(THEMES).map(name => {
+      const t = THEMES[name];
+      const on = CFG.theme === name && !CFG.nightAuto;
+      const style = [
+        'background:' + t.bg,
+        'color:' + t.fg,
+        'border:1px solid ' + (on ? t.accent : t.border),
+      ];
+      if (on) style.push('font-weight:700', 'box-shadow:0 0 0 2px ' + t.accent);
+      return '<div class="ctrl" onclick="setTheme(\'' + name + '\')" style="' + style.join(';') + '">'
+        + (t.dark ? '🌙 ' : '') + name + '</div>';
+    }).join('');
+  }
+
+  const nt = document.getElementById('nightToggle');
+  if (nt) {
+    const state = CFG.nightAuto ? '开' : '关';
+    const hour = new Date().getHours();
+    nt.textContent = '夜间自动切换：' + state
+      + (CFG.nightAuto ? '　（' + hour + '时 →' + (isNightHour(hour) ? '夜间' : '白天') + '）' : '');
+    nt.className = 'ctrl' + (CFG.nightAuto ? ' on' : '');
+  }
+
+  const sH = document.querySelector('[data-night-start]');
+  if (sH) sH.textContent = '夜间起 ' + CFG.nightStart + ':00';
+  const eH = document.querySelector('[data-night-end]');
+  if (eH) eH.textContent = '夜间止 ' + CFG.nightEnd + ':00';
+}
+
 function toast(msg) {
   const el = document.getElementById('toast');
   if (!el) return;
@@ -468,6 +573,7 @@ window.addEventListener('DOMContentLoaded', () => {
   document.getElementById('screen').style.width = SW + 'px';
   document.getElementById('screen').style.height = SH + 'px';
   render();
+  renderThemeButtons();
   document.addEventListener('keydown', e => {
     if (e.key === 'ArrowRight') nextPage(6);
     if (e.key === 'ArrowLeft')  nextPage(-6);

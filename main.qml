@@ -45,6 +45,19 @@ Rectangle {
     property string bgColor: "#FFFBF0"
     property string textColor: "#333333"
     property string themeName: "默认"
+    // 主题派生色（随 themeName 自动更新，避免各处硬编码颜色）
+    property string cardColor: "#F8F4EC"
+    property string borderColor: "#E0D8C8"
+    property string subTextColor: "#888888"
+    property string accentColor: "#2f7dcc"
+    readonly property bool darkTheme: ReaderUtils.isDarkTheme(themeName)
+
+    // ====== 夜间模式自动切换 ======
+    property bool nightAuto: false            // 是否启用按时间自动切换
+    property string dayTheme: "默认"          // 白天使用的主题
+    property string nightTheme: "深灰"        // 夜间使用的主题
+    property int nightStartHour: 20           // 夜间起始（含）
+    property int nightEndHour: 7              // 夜间结束（不含）
     property string detectedEncoding: ""      // 当前书籍检测到的编码
     property bool encodingConverting: false   // 正在转码（显示提示用）
     property string encodingNotice: ""        // 转码完成后的提示文案
@@ -266,6 +279,15 @@ Rectangle {
         onTriggered: startUploaderService()
     }
 
+    // 夜间模式自动切换检查（每 5 分钟一次，开销可忽略）
+    Timer {
+        id: nightModeTimer
+        interval: 5 * 60 * 1000
+        repeat: true
+        running: nightAuto
+        onTriggered: applyAutoTheme()
+    }
+
     // 编码探测轮询（300ms，最多 20 次 = 6 秒）
     Timer {
         id: encodingProbeTimer
@@ -421,6 +443,7 @@ Rectangle {
         } catch(e) {}
         uploaderStartTimer.start();
         loadSettings();
+        applyAutoTheme();
         loadProgressStore();
         loadBookmarksStore();
         startBookFolderScan();
@@ -702,8 +725,13 @@ Rectangle {
             bgColor: bgColor,
             textColor: textColor,
             themeName: themeName,
+            nightAuto: nightAuto,
+            dayTheme: dayTheme,
+            nightTheme: nightTheme,
             autoScrollSeconds: autoScrollSeconds,
             readerMargin: readerMargin,
+            nightStartHour: nightStartHour,
+            nightEndHour: nightEndHour,
             shelfSort: shelfSort,
             shelfFilter: shelfFilter,
             scrollMode: scrollMode,
@@ -719,9 +747,14 @@ Rectangle {
         if (isNaN(fs)) fs = FONT_DEFAULT;
         baseFontSize = Math.max(FONT_MIN, Math.min(FONT_MAX, fs));
         lineSpacing = parseInt(settings.lineSpacing) || 4;
-        bgColor = settings.bgColor || "#FFFBF0";
-        textColor = settings.textColor || "#333333";
         themeName = settings.themeName || "默认";
+        applyThemeColors();
+        // 夜间模式（旧状态文件无这些字段时用默认值）
+        nightAuto = settings.nightAuto === true;
+        dayTheme = settings.dayTheme || "默认";
+        nightTheme = settings.nightTheme || "深灰";
+        nightStartHour = clampHour(settings.nightStartHour, 20);
+        nightEndHour = clampHour(settings.nightEndHour, 7);
         // 兼容旧状态文件中的 lastFile 字段（新版本不再写入，也不用于自动恢复）
         lastFilePath = settings.lastFile || "";
         scrollMode = settings.scrollMode === true;
@@ -1988,10 +2021,42 @@ Rectangle {
 
     function setTheme(name) {
         themeName = name;
-        var colors = ReaderUtils.getThemeColors(name);
-        bgColor = colors.bg;
-        textColor = colors.fg;
+        applyThemeColors();
         saveSettings();
+    }
+
+    // 当前小时是否落在夜间区间（支持跨零点，如 20 → 7）
+    // 小时值收敛到 0-23
+    function clampHour(v, def) {
+        var n = parseInt(v);
+        if (isNaN(n)) return def;
+        return Math.max(0, Math.min(23, n));
+    }
+
+    function isNightHour(hour) {
+        var h = (hour === undefined) ? new Date().getHours() : hour;
+        if (nightStartHour === nightEndHour) return false;   // 区间为空视为不切换
+        if (nightStartHour < nightEndHour)
+            return h >= nightStartHour && h < nightEndHour;
+        // 跨零点：h >= start 或 h < end
+        return h >= nightStartHour || h < nightEndHour;
+    }
+
+    // 依据时间自动套用日/夜主题（仅在用户启用时生效）
+    function applyAutoTheme() {
+        if (!nightAuto) return;
+        var target = isNightHour() ? nightTheme : dayTheme;
+        if (themeName !== target) setTheme(target);
+    }
+
+    // 把当前主题的各个颜色槽位同步到属性上
+    function applyThemeColors() {
+        bgColor = ReaderUtils.themeColor(themeName, "bg");
+        textColor = ReaderUtils.themeColor(themeName, "fg");
+        cardColor = ReaderUtils.themeColor(themeName, "card");
+        borderColor = ReaderUtils.themeColor(themeName, "border");
+        subTextColor = ReaderUtils.themeColor(themeName, "sub");
+        accentColor = ReaderUtils.themeColor(themeName, "accent");
     }
 
     function showKeyboard(initialText, callback) {
@@ -2085,7 +2150,7 @@ Rectangle {
                 width: parent.width
                 text: uploaderAddress !== "" ? ("上传服务已启动  |  请在浏览器输入此网址上传小说") : uploaderStatus
                 font.pixelSize: 9
-                color: "#666666"
+                color: subTextColor
                 elide: Text.ElideRight
                 horizontalAlignment: Text.AlignHCenter
                 font.family: "Microsoft YaHei"
@@ -2131,13 +2196,13 @@ Rectangle {
                     width: (parent.width - 6) / 2
                     height: 24
                     radius: 3
-                    color: "#F5F5F5"
-                    border.color: "#CCCCCC"
+                    color: cardColor
+                    border.color: borderColor
                     Text {
                         anchors.centerIn: parent
                         text: "设置"
                         font.pixelSize: 11
-                        color: "#333"
+                        color: textColor
                         font.family: "Microsoft YaHei"
                     }
                     MouseArea {
@@ -2151,14 +2216,14 @@ Rectangle {
                 width: parent.width
                 height: 34
                 radius: 4
-                color: "#F8F4EC"
-                border.color: "#E0D8C8"
+                color: cardColor
+                border.color: borderColor
                 Text {
                     anchors.centerIn: parent
                     text: "我的书架 (" + bookList.length + ")"
                     font.pixelSize: 13
                     font.bold: true
-                    color: "#333333"
+                    color: textColor
                     font.family: "Microsoft YaHei"
                 }
                 MouseArea {
@@ -2279,7 +2344,7 @@ Rectangle {
                 text: "排序：" + BookList.sortLabel(shelfSort)
                       + (shelfQuery !== "" ? ("　筛选：“" + shelfQuery + "”") : "")
                 font.pixelSize: 9
-                color: "#999999"
+                color: subTextColor
                 elide: Text.ElideRight
                 font.family: "Microsoft YaHei"
             }
@@ -2298,7 +2363,7 @@ Rectangle {
                     height: 24
                     radius: 3
                     color: bookMouse.pressed ? "#E0D8C8" : "#F8F4EC"
-                    border.color: "#E0D8C8"
+                    border.color: borderColor
 
                     MouseArea {
                         id: bookMouse
@@ -2327,7 +2392,7 @@ Rectangle {
                             width: parent.width - 60
                             text: modelData.name
                             font.pixelSize: 11
-                            color: "#333"
+                            color: textColor
                             elide: Text.ElideMiddle
                             anchors.verticalCenter: parent.verticalCenter
                             font.family: "Microsoft YaHei"
@@ -2335,7 +2400,7 @@ Rectangle {
                         Text {
                             text: (modelData.progress || 0) + "%"
                             font.pixelSize: 9
-                            color: "#888"
+                            color: subTextColor
                             anchors.verticalCenter: parent.verticalCenter
                             font.family: "Microsoft YaHei"
                         }
@@ -2389,7 +2454,7 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 text: "全书 " + getBookPercent() + "%　" + getRemainingText()
                 font.pixelSize: 8
-                color: "#999999"
+                color: subTextColor
                 font.family: "Microsoft YaHei"
             }
 
@@ -2399,7 +2464,7 @@ Rectangle {
                 anchors.verticalCenter: parent.verticalCenter
                 text: getCurrentPage() + "/" + getTotalPages() + " 页"
                 font.pixelSize: 8
-                color: "#999999"
+                color: subTextColor
                 font.family: "Microsoft YaHei"
             }
         }
@@ -2822,12 +2887,12 @@ Rectangle {
                     width: 50
                     height: 24
                     radius: 4
-                    color: "#DDDDDD"
+                    color: borderColor
                     Text {
                         anchors.centerIn: parent
                         text: "返回"
                         font.pixelSize: 11
-                        color: "#333333"
+                        color: textColor
                         font.family: "Microsoft YaHei"
                     }
                     MouseArea {
@@ -2852,12 +2917,12 @@ Rectangle {
                     width: 40
                     height: 24
                     radius: 4
-                    color: "#F0F0F0"
+                    color: cardColor
                     Text {
                         anchors.centerIn: parent
                         text: "刷新"
                         font.pixelSize: 10
-                        color: "#666"
+                        color: subTextColor
                         font.family: "Microsoft YaHei"
                     }
                     MouseArea {
@@ -2896,8 +2961,8 @@ Rectangle {
                             width: statsCol.width
                             height: 26
                             radius: 3
-                            color: "#F8F4EC"
-                            border.color: "#E0D8C8"
+                            color: cardColor
+                            border.color: borderColor
 
                             Row {
                                 anchors.fill: parent
@@ -2908,7 +2973,7 @@ Rectangle {
                                     width: parent.width * 0.55
                                     text: modelData.k
                                     font.pixelSize: 11
-                                    color: "#666"
+                                    color: subTextColor
                                     anchors.verticalCenter: parent.verticalCenter
                                     font.family: "Microsoft YaHei"
                                 }
@@ -2926,7 +2991,7 @@ Rectangle {
                         }
                     }
 
-                    Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
+                    Rectangle { width: parent.width; height: 1; color: cardColor }
 
                     Text {
                         width: parent.width
@@ -2941,12 +3006,12 @@ Rectangle {
                         width: parent.width
                         text: statsSpeedText()
                         font.pixelSize: 10
-                        color: "#888"
+                        color: subTextColor
                         wrapMode: Text.WordWrap
                         font.family: "Microsoft YaHei"
                     }
 
-                    Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
+                    Rectangle { width: parent.width; height: 1; color: cardColor }
 
                     Text {
                         width: parent.width
@@ -2963,7 +3028,7 @@ Rectangle {
                               + "· 阅读天数为有阅读记录的自然日天数\n"
                               + "· 速度用于估算剩余阅读时间，样本不足时用默认值"
                         font.pixelSize: 9
-                        color: "#999"
+                        color: subTextColor
                         lineHeight: 1.4
                         wrapMode: Text.WordWrap
                         font.family: "Microsoft YaHei"
@@ -2993,12 +3058,12 @@ Rectangle {
                     width: 50
                     height: 24
                     radius: 4
-                    color: "#DDDDDD"
+                    color: borderColor
                     Text {
                         anchors.centerIn: parent
                         text: "返回"
                         font.pixelSize: 11
-                        color: "#333333"
+                        color: textColor
                         font.family: "Microsoft YaHei"
                     }
                     MouseArea {
@@ -3056,7 +3121,7 @@ Rectangle {
                         width: parent.width
                         text: "小说目录：" + defaultBookFolder
                         font.pixelSize: 9
-                        color: "#888"
+                        color: subTextColor
                         wrapMode: Text.WordWrap
                         font.family: "Microsoft YaHei"
                     }
@@ -3083,7 +3148,7 @@ Rectangle {
                     }
 
                     // 手势设置
-                    Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
+                    Rectangle { width: parent.width; height: 1; color: cardColor }
 
                     Text {
                         text: "手势"
@@ -3097,8 +3162,8 @@ Rectangle {
                         width: parent.width
                         height: 28
                         radius: 3
-                        color: "#F5F5F5"
-                        border.color: "#DDDDDD"
+                        color: cardColor
+                        border.color: borderColor
 
                         Row {
                             anchors.fill: parent
@@ -3109,7 +3174,7 @@ Rectangle {
                             Text {
                                 text: "三击返回首页"
                                 font.pixelSize: 11
-                                color: "#333"
+                                color: textColor
                                 anchors.verticalCenter: parent.verticalCenter
                                 font.family: "Microsoft YaHei"
                             }
@@ -3143,7 +3208,7 @@ Rectangle {
                     }
 
                     // 章节名显示模式
-                    Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
+                    Rectangle { width: parent.width; height: 1; color: cardColor }
 
                     Text {
                         text: "章节名显示"
@@ -3227,12 +3292,12 @@ Rectangle {
                     width: 50
                     height: 24
                     radius: 4
-                    color: "#DDDDDD"
+                    color: borderColor
                     Text {
                         anchors.centerIn: parent
                         text: "返回"
                         font.pixelSize: 11
-                        color: "#333333"
+                        color: textColor
                         font.family: "Microsoft YaHei"
                     }
                     MouseArea {
@@ -3414,12 +3479,12 @@ Rectangle {
                     width: 40
                     height: 24
                     radius: 4
-                    color: "#DDDDDD"
+                    color: borderColor
                     Text {
                         anchors.centerIn: parent
                         text: "关闭"
                         font.pixelSize: 10
-                        color: "#333333"
+                        color: textColor
                         font.family: "Microsoft YaHei"
                     }
                     MouseArea {
@@ -3448,7 +3513,7 @@ Rectangle {
                         text: "本章 " + getChapterPercent() + "%　全书 " + getBookPercent()
                               + "%　(" + getCurrentPage() + "/" + getTotalPages() + "页)"
                         font.pixelSize: 9
-                        color: "#888"
+                        color: subTextColor
                         font.family: "Microsoft YaHei"
                     }
 
@@ -3458,7 +3523,7 @@ Rectangle {
                               + "　" + getRemainingText()
                               + (readingSpeed > 0 ? ("　速度 " + readingSpeed + "字/分") : "")
                         font.pixelSize: 9
-                        color: "#AAA"
+                        color: subTextColor
                         font.family: "Microsoft YaHei"
                     }
 
@@ -3466,7 +3531,7 @@ Rectangle {
                         width: parent.width
                         height: 10
                         radius: 5
-                        color: "#DDDDDD"
+                        color: borderColor
                         Rectangle {
                             width: parent.width * (getBookPercent() / 100)
                             height: parent.height
@@ -3487,7 +3552,7 @@ Rectangle {
                         Text {
                             width: 46; height: 22
                             text: "字号 " + baseFontSize
-                            font.pixelSize: 10; color: "#666"
+                            font.pixelSize: 10; color: subTextColor
                             verticalAlignment: Text.AlignVCenter
                             font.family: "Microsoft YaHei"
                         }
@@ -3498,13 +3563,13 @@ Rectangle {
                             MouseArea { anchors.fill: parent; onClicked: stepFontSize(-1) }
                         }
                         Rectangle {
-                            width: 30; height: 22; radius: 3; color: "#EEEEEE"
+                            width: 30; height: 22; radius: 3; color: cardColor
                             Text { anchors.centerIn: parent; text: "＋"; font.pixelSize: 13; color: baseFontSize >= FONT_MAX ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
                             MouseArea { anchors.fill: parent; onClicked: stepFontSize(1) }
                         }
                         Rectangle {
-                            width: 46; height: 22; radius: 3; color: "#F5F5F5"
-                            Text { anchors.centerIn: parent; text: "重置"; font.pixelSize: 9; color: "#666"; font.family: "Microsoft YaHei" }
+                            width: 46; height: 22; radius: 3; color: cardColor
+                            Text { anchors.centerIn: parent; text: "重置"; font.pixelSize: 9; color: subTextColor; font.family: "Microsoft YaHei" }
                             MouseArea { anchors.fill: parent; onClicked: setFontSize(FONT_DEFAULT) }
                         }
                     }
@@ -3517,7 +3582,7 @@ Rectangle {
                         Text {
                             width: 46; height: 22
                             text: "行距 " + lineSpacing
-                            font.pixelSize: 10; color: "#666"
+                            font.pixelSize: 10; color: subTextColor
                             verticalAlignment: Text.AlignVCenter
                             font.family: "Microsoft YaHei"
                         }
@@ -3528,14 +3593,14 @@ Rectangle {
                             MouseArea { anchors.fill: parent; onClicked: stepLineSpacing(-1) }
                         }
                         Rectangle {
-                            width: 30; height: 22; radius: 3; color: "#EEEEEE"
+                            width: 30; height: 22; radius: 3; color: cardColor
                             Text { anchors.centerIn: parent; text: "＋"; font.pixelSize: 13; color: lineSpacing >= LINE_SPACING_MAX ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
                             MouseArea { anchors.fill: parent; onClicked: stepLineSpacing(1) }
                         }
                         Text {
                             width: 46; height: 22
                             text: "边距 " + readerMargin
-                            font.pixelSize: 10; color: "#666"
+                            font.pixelSize: 10; color: subTextColor
                             verticalAlignment: Text.AlignVCenter
                             font.family: "Microsoft YaHei"
                         }
@@ -3546,25 +3611,177 @@ Rectangle {
                             MouseArea { anchors.fill: parent; onClicked: stepMargin(-1) }
                         }
                         Rectangle {
-                            width: 30; height: 22; radius: 3; color: "#EEEEEE"
+                            width: 30; height: 22; radius: 3; color: cardColor
                             Text { anchors.centerIn: parent; text: "＋"; font.pixelSize: 13; color: readerMargin >= MARGIN_MAX ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
                             MouseArea { anchors.fill: parent; onClicked: stepMargin(1) }
                         }
                     }
 
-                    // 主题色
+                    // 主题色 —— 10 个主题按「浅色 / 深色」分两行展示
+                    Text {
+                        text: "主题"
+                        font.pixelSize: 10
+                        color: subTextColor
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    // 浅色主题
                     Row {
-                        spacing: 2
+                        spacing: 3
                         Repeater {
-                            model: [{n:"默认",c:"#FFFBF0"},{n:"白色",c:"#FFFFFF"},{n:"黄色",c:"#FFF8E1"},{n:"绿色",c:"#E8F5E9"},{n:"黑色",c:"#263238"},{n:"粉色",c:"#FCE4EC"},{n:"蓝色",c:"#E3F2FD"}]
+                            model: ["默认", "白色", "米黄", "黄色", "绿色", "蓝色", "粉色"]
                             delegate: Rectangle {
-                                width: 24; height: 18; radius: 3
-                                color: modelData.c
-                                border.color: themeName === modelData.n ? "#2f7dcc" : "#CCCCCC"
-                                border.width: themeName === modelData.n ? 2 : 1
-                                Text { anchors.centerIn: parent; text: modelData.n.charAt(0); font.pixelSize: 8; color: modelData.n === "黑色" ? "#ECEFF1" : "#333"; font.family: "Microsoft YaHei" }
-                                MouseArea { anchors.fill: parent; onClicked: setTheme(modelData.n) }
+                                width: 38; height: 20; radius: 3
+                                color: ReaderUtils.themeColor(modelData, "bg")
+                                border.color: themeName === modelData ? accentColor : borderColor
+                                border.width: themeName === modelData ? 2 : 1
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: modelData
+                                    font.pixelSize: 8
+                                    color: ReaderUtils.themeColor(modelData, "fg")
+                                    font.family: "Microsoft YaHei"
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: { nightAuto = false; setTheme(modelData); }
+                                }
                             }
+                        }
+                    }
+
+                    // 深色主题
+                    Row {
+                        spacing: 3
+                        Repeater {
+                            model: ["黑色", "深灰", "暗黑"]
+                            delegate: Rectangle {
+                                width: 54; height: 20; radius: 3
+                                color: ReaderUtils.themeColor(modelData, "bg")
+                                border.color: themeName === modelData ? accentColor : borderColor
+                                border.width: themeName === modelData ? 2 : 1
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "🌙 " + modelData
+                                    font.pixelSize: 8
+                                    color: ReaderUtils.themeColor(modelData, "fg")
+                                    font.family: "Microsoft YaHei"
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: { nightAuto = false; setTheme(modelData); }
+                                }
+                            }
+                        }
+                    }
+
+                    // 夜间模式自动切换
+                    Rectangle { width: parent.width; height: 1; color: borderColor }
+
+                    Rectangle {
+                        width: parent.width
+                        height: 28
+                        radius: 3
+                        color: cardColor
+                        border.color: borderColor
+
+                        Row {
+                            anchors.fill: parent
+                            anchors.leftMargin: 8
+                            anchors.rightMargin: 8
+                            spacing: 4
+
+                            Text {
+                                text: "夜间自动切换"
+                                font.pixelSize: 11
+                                color: textColor
+                                anchors.verticalCenter: parent.verticalCenter
+                                font.family: "Microsoft YaHei"
+                            }
+                            Item { width: parent.width - 120; height: 1 }
+
+                            Rectangle {
+                                width: 40; height: 20; radius: 10
+                                color: nightAuto ? "#4CAF50" : borderColor
+                                anchors.verticalCenter: parent.verticalCenter
+
+                                Rectangle {
+                                    x: nightAuto ? 22 : 2
+                                    y: 2
+                                    width: 16; height: 16; radius: 8
+                                    color: "#FFFFFF"
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        nightAuto = !nightAuto;
+                                        if (nightAuto) applyAutoTheme();
+                                        saveSettings();
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // 时间区间与日/夜主题（仅在启用时显示）
+                    Row {
+                        visible: nightAuto
+                        spacing: 4
+                        height: 22
+
+                        Text {
+                            text: "夜间时段"
+                            font.pixelSize: 10
+                            color: subTextColor
+                            anchors.verticalCenter: parent.verticalCenter
+                            font.family: "Microsoft YaHei"
+                        }
+                        Rectangle {
+                            width: 42; height: 20; radius: 3
+                            color: cardColor; border.color: borderColor
+                            Text {
+                                anchors.centerIn: parent
+                                text: nightStartHour + ":00"
+                                font.pixelSize: 10; color: textColor
+                                font.family: "Microsoft YaHei"
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: showKeyboard(String(nightStartHour), function (t) {
+                                    nightStartHour = clampHour(t, 20);
+                                    applyAutoTheme(); saveSettings();
+                                })
+                            }
+                        }
+                        Text {
+                            text: "→"
+                            font.pixelSize: 10
+                            color: subTextColor
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
+                        Rectangle {
+                            width: 42; height: 20; radius: 3
+                            color: cardColor; border.color: borderColor
+                            Text {
+                                anchors.centerIn: parent
+                                text: nightEndHour + ":00"
+                                font.pixelSize: 10; color: textColor
+                                font.family: "Microsoft YaHei"
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: showKeyboard(String(nightEndHour), function (t) {
+                                    nightEndHour = clampHour(t, 7);
+                                    applyAutoTheme(); saveSettings();
+                                })
+                            }
+                        }
+                        Text {
+                            text: "当前：" + (isNightHour() ? "夜间" : "白天")
+                            font.pixelSize: 9
+                            color: subTextColor
+                            anchors.verticalCenter: parent.verticalCenter
+                            font.family: "Microsoft YaHei"
                         }
                     }
 
@@ -3616,12 +3833,12 @@ Rectangle {
                     width: 50
                     height: 24
                     radius: 4
-                    color: "#DDDDDD"
+                    color: borderColor
                     Text {
                         anchors.centerIn: parent
                         text: "返回"
                         font.pixelSize: 11
-                        color: "#333333"
+                        color: textColor
                         font.family: "Microsoft YaHei"
                     }
                     MouseArea {
@@ -3646,12 +3863,12 @@ Rectangle {
                     width: 40
                     height: 24
                     radius: 4
-                    color: "#EEEEEE"
+                    color: cardColor
                     Text {
                         anchors.centerIn: parent
                         text: "清空"
                         font.pixelSize: 10
-                        color: "#333333"
+                        color: textColor
                         font.family: "Microsoft YaHei"
                     }
                     MouseArea {
@@ -3667,7 +3884,7 @@ Rectangle {
                 height: 28
                 radius: 4
                 color: "#FFFFFF"
-                border.color: "#CCCCCC"
+                border.color: borderColor
 
                 Text {
                     anchors.left: parent.left
@@ -3769,8 +3986,8 @@ Rectangle {
                     width: ListView.view.width
                     height: hitText.height + 12
                     radius: 4
-                    color: "#F5F5F5"
-                    border.color: "#E0E0E0"
+                    color: cardColor
+                    border.color: borderColor
 
                     Column {
                         id: hitText
@@ -3785,7 +4002,7 @@ Rectangle {
                             text: "第 " + (Search.chapterIndexForLine(modelData.line, chapterBoundaries) + 1)
                                   + " 章 · 第 " + (modelData.line + 1) + " 行"
                             font.pixelSize: 9
-                            color: "#999999"
+                            color: subTextColor
                             font.family: "Microsoft YaHei"
                         }
 
@@ -3840,12 +4057,12 @@ Rectangle {
                     width: 50
                     height: 24
                     radius: 4
-                    color: "#DDDDDD"
+                    color: borderColor
                     Text {
                         anchors.centerIn: parent
                         text: "返回"
                         font.pixelSize: 11
-                        color: "#333333"
+                        color: textColor
                         font.family: "Microsoft YaHei"
                     }
                     MouseArea {
@@ -3870,12 +4087,12 @@ Rectangle {
                     width: 40
                     height: 24
                     radius: 4
-                    color: "#DDDDDD"
+                    color: borderColor
                     Text {
                         anchors.centerIn: parent
                         text: "x"
                         font.pixelSize: 11
-                        color: "#333"
+                        color: textColor
                         font.family: "Microsoft YaHei"
                     }
                     MouseArea {
@@ -3989,8 +4206,8 @@ Rectangle {
                 height: 24
                 spacing: 6
                 Rectangle {
-                    width: 50; height: 24; radius: 4; color: "#DDDDDD"
-                    Text { anchors.centerIn: parent; text: "返回"; font.pixelSize: 11; color: "#333333"; font.family: "Microsoft YaHei" }
+                    width: 50; height: 24; radius: 4; color: borderColor
+                    Text { anchors.centerIn: parent; text: "返回"; font.pixelSize: 11; color: textColor; font.family: "Microsoft YaHei" }
                     MouseArea { anchors.fill: parent; onClicked: closePanels() }
                 }
                 Text {
@@ -4011,7 +4228,7 @@ Rectangle {
             Rectangle {
                 width: parent.width
                 height: 1
-                color: "#EEEEEE"
+                color: cardColor
             }
 
             ListView {
@@ -4027,7 +4244,7 @@ Rectangle {
                     height: (modelData.note && modelData.note !== "") ? 50 : 36
                     radius: 4
                     color: bmMouse.pressed ? "#E0D8C8" : "#F5F0E8"
-                    border.color: "#DDDDDD"
+                    border.color: borderColor
 
                     MouseArea {
                         id: bmMouse
@@ -4058,14 +4275,14 @@ Rectangle {
                         Text {
                             text: "书签 " + (index + 1) + " - 第" + (Math.floor(modelData.line / getLinesPerPage()) + 1) + "页"
                             font.pixelSize: 11
-                            color: "#333"
+                            color: textColor
                             font.family: "Microsoft YaHei"
                         }
                         Text {
                             width: parent.width
                             text: modelData.preview || "..."
                             font.pixelSize: 9
-                            color: "#888"
+                            color: subTextColor
                             elide: Text.ElideRight
                             font.family: "Microsoft YaHei"
                         }
@@ -4159,8 +4376,8 @@ Rectangle {
                 height: 24
                 spacing: 6
                 Rectangle {
-                    width: 50; height: 24; radius: 4; color: "#DDDDDD"
-                    Text { anchors.centerIn: parent; text: "返回"; font.pixelSize: 11; color: "#333333"; font.family: "Microsoft YaHei" }
+                    width: 50; height: 24; radius: 4; color: borderColor
+                    Text { anchors.centerIn: parent; text: "返回"; font.pixelSize: 11; color: textColor; font.family: "Microsoft YaHei" }
                     MouseArea { anchors.fill: parent; onClicked: closePanels() }
                 }
                 Text {
@@ -4171,8 +4388,8 @@ Rectangle {
                     font.family: "Microsoft YaHei"
                 }
                 Rectangle {
-                    width: 40; height: 24; radius: 4; color: "#DDDDDD"
-                    Text { anchors.centerIn: parent; text: "x"; font.pixelSize: 11; color: "#333"; font.family: "Microsoft YaHei" }
+                    width: 40; height: 24; radius: 4; color: borderColor
+                    Text { anchors.centerIn: parent; text: "x"; font.pixelSize: 11; color: textColor; font.family: "Microsoft YaHei" }
                     MouseArea { anchors.fill: parent; onClicked: closePanels() }
                 }
             }
@@ -4264,7 +4481,7 @@ Rectangle {
             height: 148
             radius: 8
             color: bgColor === "#263238" ? "#37474F" : "#FFFFFF"
-            border.color: "#CCCCCC"
+            border.color: borderColor
 
             Column {
                 anchors.fill: parent
@@ -4281,7 +4498,7 @@ Rectangle {
                     font.family: "Microsoft YaHei"
                 }
 
-                Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
+                Rectangle { width: parent.width; height: 1; color: cardColor }
 
                 MenuButton {
                     label: "书籍信息"
@@ -4356,7 +4573,7 @@ Rectangle {
         anchors.margins: 10
         radius: 6
         color: bgColor === "#263238" ? "#37474F" : "#FFFFFF"
-        border.color: "#CCCCCC"
+        border.color: borderColor
         z: 60
 
         Column {
@@ -4401,9 +4618,9 @@ Rectangle {
                     Row {
                         width: parent.width
                         spacing: 4
-                        Text { text: "总字数"; font.pixelSize: 10; color: "#888"; font.family: "Microsoft YaHei"; width: parent.width / 3 }
-                        Text { text: "章节数"; font.pixelSize: 10; color: "#888"; font.family: "Microsoft YaHei"; width: parent.width / 3 }
-                        Text { text: "阅读时长"; font.pixelSize: 10; color: "#888"; font.family: "Microsoft YaHei"; width: parent.width / 3 }
+                        Text { text: "总字数"; font.pixelSize: 10; color: subTextColor; font.family: "Microsoft YaHei"; width: parent.width / 3 }
+                        Text { text: "章节数"; font.pixelSize: 10; color: subTextColor; font.family: "Microsoft YaHei"; width: parent.width / 3 }
+                        Text { text: "阅读时长"; font.pixelSize: 10; color: subTextColor; font.family: "Microsoft YaHei"; width: parent.width / 3 }
                     }
                     Row {
                         width: parent.width
@@ -4413,17 +4630,17 @@ Rectangle {
                         Text { text: bookInfoItem ? formatReadingTime(bookInfoItem.readingTime) : "0"; font.pixelSize: 14; font.bold: true; color: textColor; font.family: "Microsoft YaHei"; width: parent.width / 3 }
                     }
 
-                    Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
+                    Rectangle { width: parent.width; height: 1; color: cardColor }
 
                     Row {
                         width: parent.width; spacing: 4
-                        Text { text: "文件"; font.pixelSize: 10; color: "#888"; font.family: "Microsoft YaHei"; width: 40 }
+                        Text { text: "文件"; font.pixelSize: 10; color: subTextColor; font.family: "Microsoft YaHei"; width: 40 }
                         Text { text: bookInfoItem ? bookInfoItem.name : ""; font.pixelSize: 10; color: textColor; elide: Text.ElideRight; font.family: "Microsoft YaHei"; width: parent.width - 44 }
                     }
                     Row {
                         width: parent.width; spacing: 4
-                        Text { text: "路径"; font.pixelSize: 10; color: "#888"; font.family: "Microsoft YaHei"; width: 40 }
-                        Text { text: bookInfoItem ? ReaderUtils.stripFilePrefix(bookInfoItem.file) : ""; font.pixelSize: 9; color: "#888"; elide: Text.ElideLeft; font.family: "Microsoft YaHei"; width: parent.width - 44 }
+                        Text { text: "路径"; font.pixelSize: 10; color: subTextColor; font.family: "Microsoft YaHei"; width: 40 }
+                        Text { text: bookInfoItem ? ReaderUtils.stripFilePrefix(bookInfoItem.file) : ""; font.pixelSize: 9; color: subTextColor; elide: Text.ElideLeft; font.family: "Microsoft YaHei"; width: parent.width - 44 }
                     }
 
                     MenuButton {
@@ -4453,13 +4670,13 @@ Rectangle {
         height: 24
         radius: 4
         color: "#FFFFFF"
-        border.color: "#DDDDDD"
+        border.color: borderColor
         z: 100
         Text {
             anchors.centerIn: parent
             text: "加载中..."
             font.pixelSize: 11
-            color: "#333"
+            color: textColor
             font.family: "Microsoft YaHei"
         }
     }
