@@ -3,6 +3,8 @@
 
 var defaultBookFolder = "/userdisk/Music/小说/";
 var defaultBookSuffix = ".txt";
+// 书架最多显示的条目数（超出时界面提示，见 getBookListTotal）
+var MAX_ITEMS_BOOKS = 200;
 
 function setDefaults(folder, suffix) {
     defaultBookFolder = folder;
@@ -312,6 +314,13 @@ function processContent(content, charsPerLine) {
     return wrapLines(rawLines, charsPerLine * 2);
 }
 
+// 书架在截断前的实际条目总数（供界面提示「已显示 N / 共 M 本」）
+var bookListTotal = 0;
+
+function getBookListTotal() {
+    return bookListTotal;
+}
+
 function buildBookList(folderScanAvailable, bookFolderModel, progressStore, defaultBookFolder) {
     var items = [];
     var seen = {};
@@ -360,9 +369,15 @@ function buildBookList(folderScanAvailable, bookFolderModel, progressStore, defa
         if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
         return a.name.localeCompare(b.name);
     });
-    if (items.length > 50) items = items.slice(0, 50);
+    // 书架显示上限。超出部分此前被静默丢弃（上限 50）且无任何提示，
+    // 用户会误以为小说没被识别。现提高至 200，并记录总数供界面提示。
+    bookListTotal = items.length;
+    if (items.length > MAX_ITEMS_BOOKS) {
+        items = items.slice(0, MAX_ITEMS_BOOKS);
+    }
     return items;
 }
+
 
 function folderModelFileUrl(bookFolderModel, index, defaultBookFolder) {
     if (!bookFolderModel) return "";

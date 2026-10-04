@@ -120,11 +120,12 @@ Rectangle {
     property string activePanel: ""
     property bool keyboardPending: false
     property var bookList: []
+    property int bookListTotal: 0   // 书架截断前的实际总数
     property var bookmarkList: []
     property var progressStore: ({})
     property var bookmarksStore: ({})
     property var readingTimeData: ({})    // url -> 累计阅读秒数
-    property string lastFilePath: ""
+    property string lastFilePath: ""   // 仅内存记录当前书籍；不再持久化（原先只写不读）
     property var bookFolderModel: null
     property bool folderScanAvailable: false
     property var uploaderController: (typeof shellPluginController !== "undefined") ? shellPluginController : null
@@ -185,9 +186,27 @@ Rectangle {
         onTriggered: nextPage()
     }
 
+    // 书架页自动重扫：用户停留在书架时（例如正在用手机上传小说），
+    // 定期重扫目录，新上传的文件无需手动退出再进即可出现。
+    // 仅在书架页可见时运行，且间隔较长，避免频繁 IO。
+    Timer {
+        id: shelfAutoRefreshTimer
+        interval: 8000
+        repeat: true
+        running: pageMode === "shelf" && activePanel === ""
+        onTriggered: refreshShelf()
+    }
+
+    // 进度延迟落盘：翻页等操作后延迟写一次，合并短时间内的多次变更。
+    // 注：与下方 periodicSaveTimer 的分工是——
+    //   本定时器：操作「后」的延迟落盘（防抖），不更新数据本身
+    //   periodicSaveTimer：固定间隔的兜底保存（含数据更新），防实体按键退出丢进度
+    // 两者此前间隔分别为 3s / 5s 且都执行全量双写，导致阅读时平均每 2~3 秒
+    // 就要重写一次状态文件（每次 2 条 shell 命令 + 1 次同步 XHR）。
+    // 现将延迟落盘统一为 5s，与兜底保存错开，显著降低写入频率。
     Timer {
         id: progressFlushTimer
-        interval: 3000
+        interval: 5000
         repeat: false
         onTriggered: Storage.flushProgressStore(progressStore)
     }
@@ -220,7 +239,7 @@ Rectangle {
                 var line = Math.floor(scrollFlickable.contentY / getTextLineHeight());
                 currentLine = Math.max(0, Math.min(line, Math.max(0, lines.length - getLinesPerPage())));
             }
-            Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent());
+            Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent(), readingTimeData[currentUrl]);
             Storage.flushProgressStore(progressStore);
         }
     }
@@ -350,7 +369,7 @@ Rectangle {
     Component.onDestruction: {
         // 不依赖 currentUrl——returnToShelf 已清空，但 progressStore 内存中仍有正确数据
         if (currentUrl !== "" && lines.length > 0) {
-            Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length);
+            Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent(), readingTimeData[currentUrl]);
         }
         // 始终刷一遍 progressStore——里面保存的是最后一次完整保存的进度
         Storage.flushProgressStore(progressStore);
@@ -432,14 +451,20 @@ Rectangle {
         uploaderOutputTimer.stop();
     }
 
-    function openShelf() {
-        // 进书架时强制重扫目录，反映最新的文件状态
+    // 强制重扫小说目录并刷新书架列表。
+    // 上传服务、外部 SFTP 等都会在插件运行期间改变目录内容，
+    // 因此进入书架前必须重扫，否则显示的是陈旧数据。
+    function refreshShelf() {
         if (bookFolderModel) {
             try { bookFolderModel.destroy(); } catch(e) {}
             bookFolderModel = null;
             folderScanAvailable = false;
         }
         startBookFolderScan();
+    }
+
+    function openShelf() {
+        refreshShelf();
         navigateTo("shelf");
     }
 
@@ -574,9 +599,7 @@ Rectangle {
 
     // 保存进度到内存并立即写入文件
     function saveProgress() {
-        Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent());
-        if (currentUrl && readingTimeData[currentUrl] !== undefined)
-            progressStore[currentUrl].readingTime = readingTimeData[currentUrl];
+        Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent(), readingTimeData[currentUrl]);
         Storage.flushProgressStore(progressStore);
     }
 
@@ -584,9 +607,7 @@ Rectangle {
     function flushProgress() {
         if (currentUrl === "")
             return;
-        Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent());
-        if (currentUrl && readingTimeData[currentUrl] !== undefined)
-            progressStore[currentUrl].readingTime = readingTimeData[currentUrl];
+        Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent(), readingTimeData[currentUrl]);
         Storage.flushProgressStore(progressStore);
     }
 
@@ -614,7 +635,6 @@ Rectangle {
             bgColor: bgColor,
             textColor: textColor,
             themeName: themeName,
-            lastFile: lastFilePath,
             autoScrollSeconds: autoScrollSeconds,
             scrollMode: scrollMode,
             tripleTapHome: tripleTapHome,
@@ -630,6 +650,7 @@ Rectangle {
         bgColor = settings.bgColor || "#FFFBF0";
         textColor = settings.textColor || "#333333";
         themeName = settings.themeName || "默认";
+        // 兼容旧状态文件中的 lastFile 字段（新版本不再写入，也不用于自动恢复）
         lastFilePath = settings.lastFile || "";
         scrollMode = settings.scrollMode === true;
         if (settings.autoScrollSeconds !== undefined) {
@@ -647,6 +668,7 @@ Rectangle {
 
     function loadBookList() {
         bookList = ReaderUtils.buildBookList(folderScanAvailable, bookFolderModel, progressStore, defaultBookFolder);
+        bookListTotal = ReaderUtils.getBookListTotal();
     }
 
     // 书架长按菜单：重命名
@@ -971,8 +993,10 @@ Rectangle {
     function returnToShelf() {
         clearReaderState();
         navigateRoot();
+        // 修复：此处原先只调 loadBookList()，不重扫目录，
+        // 导致从阅读器返回书架时看不到期间新增/删除的文件。
+        refreshShelf();
         navigateTo("shelf");
-        loadBookList();
     }
 
     function returnToHome() {
@@ -1242,7 +1266,7 @@ Rectangle {
         pageSlideAnim.start();
 
         // 保存进度到内存并立即写入文件
-        Storage.updateProgressMemory(progressStore, currentUrl, fileName, newLine, lines.length, currentChapterIdx, calcBookPercent());
+        Storage.updateProgressMemory(progressStore, currentUrl, fileName, newLine, lines.length, currentChapterIdx, calcBookPercent(), readingTimeData[currentUrl]);
         progressFlushTimer.restart();
     }
 
@@ -1283,7 +1307,7 @@ Rectangle {
         pageSlideAnim.to = 0;
         pageSlideAnim.start();
 
-        Storage.updateProgressMemory(progressStore, currentUrl, fileName, newLine, lines.length, currentChapterIdx, calcBookPercent());
+        Storage.updateProgressMemory(progressStore, currentUrl, fileName, newLine, lines.length, currentChapterIdx, calcBookPercent(), readingTimeData[currentUrl]);
         progressFlushTimer.restart();
     }
 
@@ -1599,7 +1623,9 @@ Rectangle {
                 Text {
                     width: parent.width - 102
                     height: 24
-                    text: "书架 (" + bookList.length + ")"
+                    text: bookListTotal > bookList.length
+                          ? ("书架 (" + bookList.length + "/共 " + bookListTotal + " 本)")
+                          : ("书架 (" + bookList.length + ")")
                     font.pixelSize: 13
                     font.bold: true
                     color: textColor
@@ -1753,7 +1779,7 @@ Rectangle {
                 if (scrollMode) {
                     var line = Math.floor(contentY / getTextLineHeight());
                     currentLine = Math.max(0, Math.min(line, Math.max(0, lines.length - getLinesPerPage())));
-                    Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent());
+                    Storage.updateProgressMemory(progressStore, currentUrl, fileName, currentLine, lines.length, currentChapterIdx, calcBookPercent(), readingTimeData[currentUrl]);
                     Storage.flushProgressStore(progressStore);
                 }
             }

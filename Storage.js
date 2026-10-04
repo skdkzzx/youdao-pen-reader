@@ -176,13 +176,13 @@ function saveSettingsToStore(settings) {
 // 修复：原实现整本书只保存一个 chapterIdx + line，换章后回到旧章节时
 // 因 chapterIdx 不匹配而一律从第 0 行开始，等于丢失该章进度。
 // 现按 url + chapterIdx 分别保存，同时保留顶层字段兼容旧数据。
-function updateProgressMemory(progressStore, currentUrl, fileName, currentLine, totalLines, chapterIdx, bookPercent) {
+function updateProgressMemory(progressStore, currentUrl, fileName, currentLine, totalLines, chapterIdx, bookPercent, readingTime) {
     if (currentUrl === "") return;
     var idx = chapterIdx !== undefined ? chapterIdx : 0;
     var prev = progressStore[currentUrl] || {};
     var chapters = prev.chapters || {};
     chapters[String(idx)] = currentLine;
-    progressStore[currentUrl] = {
+    var rec = {
         file: currentUrl,
         name: fileName,
         line: currentLine,
@@ -192,6 +192,16 @@ function updateProgressMemory(progressStore, currentUrl, fileName, currentLine, 
         bookPercent: bookPercent !== undefined ? bookPercent : 0,
         timestamp: new Date().getTime()
     };
+    // 修复：本函数会整体重建记录对象，此前未保留 readingTime，
+    // 导致 periodicSaveTimer（阅读时每 5 秒）一触发就把阅读时长抹掉，
+    // 时长显示在 flushProgress 与定时保存之间反复跳变。
+    // 现沿用既有 readingTime，仅在调用方显式传入时覆盖。
+    if (readingTime !== undefined && readingTime !== null) {
+        rec.readingTime = readingTime;
+    } else if (prev.readingTime !== undefined) {
+        rec.readingTime = prev.readingTime;
+    }
+    progressStore[currentUrl] = rec;
 }
 
 function flushProgressStore(progressStore) {
