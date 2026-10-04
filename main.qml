@@ -3,6 +3,7 @@ import "qrc:/qml/commons"
 import "Storage.js" as Storage
 import "ReaderUtils.js" as ReaderUtils
 import "Encoding.js" as Encoding
+import "ReadingStats.js" as Stats
 
 Rectangle {
     id: root
@@ -45,6 +46,16 @@ Rectangle {
     property string detectedEncoding: ""      // 当前书籍检测到的编码
     property bool encodingConverting: false   // 正在转码（显示提示用）
     property string encodingNotice: ""        // 转码完成后的提示文案
+    // ====== 进度与阅读速度（用于剩余时间估算）======
+    // 字符偏移是稳定的进度度量：行号会随字号/行距变化，字符偏移不会。
+    property int chapterCharCount: 0          // 当前章节总字符数
+    property var chapterCharOffsets: []       // 每章起始字符偏移 [{start, chars}]
+    property int chapterCharsBefore: 0        // 当前章节之前的累计字符数
+    property int bookCharTotal: 0             // 全书总字符数
+    property int readingSpeed: 0              // 实测阅读速度（字符/分），0=未测得
+    property double sessionCharsAtStart: 0    // 本次会话开始时的字符偏移
+    property double sessionStartMs: 0         // 本次会话开始的时间戳
+
     property string encodingProbeUrl: ""      // 正在探测编码的书籍
     property int encodingProbeRetry: 0
     property string encodingConvertUrl: ""
@@ -280,6 +291,7 @@ Rectangle {
         onTriggered: {
             if (currentUrl === "") return;
             readingTimeData[currentUrl] = (readingTimeData[currentUrl] || 0) + 1;
+            updateReadingSpeed();
         }
     }
 
@@ -1051,6 +1063,10 @@ Rectangle {
             flushProgress();
         }
 
+        // 记录本次阅读会话的起点，用于实测阅读速度
+        sessionStartMs = new Date().getTime();
+        sessionCharsAtStart = 0;
+
         // 取消上一本书残留的编码探测/转码任务，避免回调污染新书籍
         encodingProbeTimer.stop();
         encodingConvertTimer.stop();
@@ -1308,12 +1324,100 @@ Rectangle {
             scrollFlickable.contentY = currentLine * getTextLineHeight();
         }
 
+        updateChapterCharStats();
+        // 首次进入本书时，把会话字符起点对齐到当前位置，
+        // 避免把「打开前的历史进度」误算进本次速度样本
+        if (sessionStartMs === 0) {
+            sessionStartMs = new Date().getTime();
+            sessionCharsAtStart = currentCharOffset();
+        }
         updateChapterList();
         updateScrollMax();
         loadBookmarkList();
         saveSettings();
         isLoading = false;
         statusMessage = "";
+    }
+
+    // 计算全书与各章的字符统计（在解析完成后调用一次）
+    function computeCharStats() {
+        chapterCharOffsets = [];
+        var acc = 0;
+        var total = 0;
+        for (var i = 0; i < chapterBoundaries.length; i++) {
+            var b = chapterBoundaries[i];
+            var chars = 0;
+            for (var j = b.startRaw; j < b.endRaw; j++) {
+                chars += (rawLines[j] ? rawLines[j].length : 0) + 1;  // +1 计换行
+            }
+            chapterCharOffsets.push({ start: acc, chars: chars });
+            acc += chars;
+        }
+        total = acc;
+        bookCharTotal = total;
+        updateChapterCharStats();
+    }
+
+    // 更新「当前章节」相关的字符统计量
+    function updateChapterCharStats() {
+        if (currentChapterIdx >= 0 && currentChapterIdx < chapterCharOffsets.length) {
+            var c = chapterCharOffsets[currentChapterIdx];
+            chapterCharsBefore = c.start;
+            chapterCharCount = c.chars;
+        } else {
+            chapterCharsBefore = 0;
+            chapterCharCount = 0;
+        }
+    }
+
+    // 当前阅读位置对应的全书字符偏移
+    function currentCharOffset() {
+        if (chapterCharCount <= 0) return 0;
+        var inChapter = 0;
+        if (lines.length > 0 && chapterCharOffsets.length > currentChapterIdx
+            && currentChapterIdx >= 0) {
+            var perLine = chapterCharCount / Math.max(1, lines.length);
+            inChapter = Math.round(currentLine * perLine);
+        }
+        return chapterCharsBefore + Math.min(inChapter, chapterCharCount);
+    }
+
+    // 全书进度百分比（基于字符偏移）
+    function getBookPercent() {
+        if (bookCharTotal <= 0) return getProgressPercent();
+        return Stats.bookPercent(currentCharOffset(), bookCharTotal);
+    }
+
+    // 本章进度百分比
+    function getChapterPercent() {
+        if (chapterCharCount <= 0) return getProgressPercent();
+        var inChapter = currentCharOffset() - chapterCharsBefore;
+        return Stats.chapterPercent(inChapter, chapterCharCount);
+    }
+
+    // 预计剩余阅读时长（秒）；速度未测得时用默认值估算
+    function getRemainingSeconds() {
+        if (bookCharTotal <= 0) return 0;
+        var remain = bookCharTotal - currentCharOffset();
+        return Stats.estimatedRemainingSeconds(remain, readingSpeed);
+    }
+
+    // 剩余时长的可读文案
+    function getRemainingText() {
+        var sec = getRemainingSeconds();
+        if (sec <= 0) return "已读完";
+        return "剩余约 " + Stats.formatRemaining(sec);
+    }
+
+    // 依据本次会话「读了多久 / 读了多少字」估算阅读速度。
+    // 样本不足或数值异常时保持 0（表示未测得），由估算函数退回默认速度。
+    function updateReadingSpeed() {
+        if (sessionStartMs <= 0 || currentUrl === "") return;
+        var elapsed = (new Date().getTime() - sessionStartMs) / 1000;
+        if (elapsed < 60) return;                     // 至少读满 1 分钟才有参考价值
+        var charsRead = currentCharOffset() - sessionCharsAtStart;
+        var spd = Stats.estimateSpeed(charsRead, elapsed);
+        if (spd > 0) readingSpeed = spd;
     }
 
     function updateChapterList() {
@@ -1355,6 +1459,7 @@ Rectangle {
         try {
             rawLines = ReaderUtils.splitIntoLines(content);
             chapterBoundaries = scanChapterBoundaries(rawLines);
+            computeCharStats();
 
             // 读取保存的进度 → 定位到对应章节
             var saved = loadProgress(currentUrl);
@@ -2744,12 +2849,23 @@ Rectangle {
                     width: parent.width
                     spacing: 4
 
-                    // 进度 + 阅读时长
+                    // 进度 + 阅读时长 + 剩余时间预估
                     Text {
                         width: parent.width
-                        text: "进度: " + getProgressPercent() + "% (" + getCurrentPage() + "/" + getTotalPages() + "页)    阅读: " + formatReadingTime(readingTimeData[currentUrl])
+                        text: "本章 " + getChapterPercent() + "%　全书 " + getBookPercent()
+                              + "%　(" + getCurrentPage() + "/" + getTotalPages() + "页)"
                         font.pixelSize: 9
                         color: "#888"
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: "已读 " + formatReadingTime(readingTimeData[currentUrl])
+                              + "　" + getRemainingText()
+                              + (readingSpeed > 0 ? ("　速度 " + readingSpeed + "字/分") : "")
+                        font.pixelSize: 9
+                        color: "#AAA"
                         font.family: "Microsoft YaHei"
                     }
 
@@ -2759,7 +2875,7 @@ Rectangle {
                         radius: 5
                         color: "#DDDDDD"
                         Rectangle {
-                            width: parent.width * (getProgressPercent() / 100)
+                            width: parent.width * (getBookPercent() / 100)
                             height: parent.height
                             radius: 5
                             color: "#2f7dcc"
