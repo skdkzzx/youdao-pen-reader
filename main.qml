@@ -4,6 +4,7 @@ import "Storage.js" as Storage
 import "ReaderUtils.js" as ReaderUtils
 import "Encoding.js" as Encoding
 import "ReadingStats.js" as Stats
+import "Search.js" as Search
 
 Rectangle {
     id: root
@@ -55,6 +56,16 @@ Rectangle {
     property int readingSpeed: 0              // 实测阅读速度（字符/分），0=未测得
     property double sessionCharsAtStart: 0    // 本次会话开始时的字符偏移
     property double sessionStartMs: 0         // 本次会话开始的时间戳
+
+    // ====== 全文搜索 ======
+    property string searchQuery: ""           // 用户输入的关键词
+    property var searchResults: []            // 命中结果
+    property int searchTotal: 0               // 命中总数（可能超过显示上限）
+    property bool searchTruncated: false
+    property bool searchWholeWord: false
+    property bool searchCaseSensitive: false
+    property string searchDate: ""            // 记忆上次搜索的时间（可选）
+    property double pendingSearchRatio: -1    // 跨章跳转时待定位的比例
 
     property string encodingProbeUrl: ""      // 正在探测编码的书籍
     property int encodingProbeRetry: 0
@@ -874,6 +885,14 @@ Rectangle {
         }
     }
 
+    // HTML 转义（用于 StyledText 中安全嵌入用户文本）
+    function escapeHtml(str) {
+        if (typeof str !== "string") return "";
+        return str.replace(/&/g, "&amp;")
+                  .replace(/</g, "&lt;")
+                  .replace(/>/g, "&gt;");
+    }
+
     function shellEscape(str) {
         return "'" + str.replace(/'/g, "'\''") + "'";
     }
@@ -1066,6 +1085,13 @@ Rectangle {
         // 记录本次阅读会话的起点，用于实测阅读速度
         sessionStartMs = new Date().getTime();
         sessionCharsAtStart = 0;
+
+        // 清空上一本书的搜索结果（行号已无意义）
+        searchQuery = "";
+        searchResults = [];
+        searchTotal = 0;
+        searchTruncated = false;
+        pendingSearchRatio = -1;
 
         // 取消上一本书残留的编码探测/转码任务，避免回调污染新书籍
         encodingProbeTimer.stop();
@@ -1324,6 +1350,16 @@ Rectangle {
             scrollFlickable.contentY = currentLine * getTextLineHeight();
         }
 
+        // 跨章搜索跳转：章节切换后按记录的比例定位
+        if (pendingSearchRatio >= 0) {
+            currentLine = Math.min(Math.floor(pendingSearchRatio * lines.length), maxStartLine());
+            clampCurrentLine();
+            if (scrollMode) {
+                scrollFlickable.contentY = currentLine * getTextLineHeight();
+            }
+            pendingSearchRatio = -1;
+        }
+
         updateChapterCharStats();
         // 首次进入本书时，把会话字符起点对齐到当前位置，
         // 避免把「打开前的历史进度」误算进本次速度样本
@@ -1418,6 +1454,76 @@ Rectangle {
         var charsRead = currentCharOffset() - sessionCharsAtStart;
         var spd = Stats.estimateSpeed(charsRead, elapsed);
         if (spd > 0) readingSpeed = spd;
+    }
+
+    // ====== 全文搜索 ======
+
+    function openSearch() {
+        searchQuery = "";
+        searchResults = [];
+        searchTotal = 0;
+        searchTruncated = false;
+        activePanel = "search";
+    }
+
+    // 执行搜索（基于 rawLines，不受换行与字号影响）
+    function runSearch(query) {
+        searchQuery = query || "";
+        if (searchQuery === "") {
+            searchResults = [];
+            searchTotal = 0;
+            searchTruncated = false;
+            return;
+        }
+        if (!rawLines || rawLines.length === 0) {
+            searchResults = [];
+            searchTotal = 0;
+            return;
+        }
+        var r = Search.search(rawLines, searchQuery, {
+            caseSensitive: searchCaseSensitive,
+            wholeWord: searchWholeWord
+        });
+        searchResults = r.hits;
+        searchTotal = r.total;
+        searchTruncated = r.truncated;
+    }
+
+    // 按章节归组，供结果列表展示
+    function searchGroups() {
+        if (!searchResults || searchResults.length === 0) return [];
+        return Search.groupByChapter(searchResults, chapterBoundaries);
+    }
+
+    // 跳转到某条搜索结果
+    function jumpToSearchHit(hit) {
+        if (!hit) return;
+        var targetChapter = Search.chapterIndexForLine(hit.line, chapterBoundaries);
+        if (targetChapter < 0) targetChapter = 0;
+
+        // 计算该原始行在目标章节内的行号
+        var b = chapterBoundaries[targetChapter];
+        var rawLineInChapter = hit.line - b.startRaw;
+
+        if (targetChapter === currentChapterIdx) {
+            // 已在该章：直接按比例定位到对应换行后的行
+            var b2 = chapterBoundaries[currentChapterIdx];
+            var rawCount = Math.max(1, b2.endRaw - b2.startRaw);
+            var ratio = rawLineInChapter / rawCount;
+            currentLine = Math.min(Math.floor(ratio * lines.length), maxStartLine());
+            clampCurrentLine();
+            if (scrollMode) {
+                scrollFlickable.contentY = currentLine * getTextLineHeight();
+            }
+            closePanels();
+            return;
+        }
+
+        // 跨章：切章后再定位。loadChapter 会从保存的进度恢复，
+        // 因此这里用待定位变量在 loadChapter 完成后校正。
+        pendingSearchRatio = rawLineInChapter / Math.max(1, b.endRaw - b.startRaw);
+        loadChapter(targetChapter);
+        closePanels();
     }
 
     function updateChapterList() {
@@ -2940,6 +3046,7 @@ Rectangle {
                         columnSpacing: 3
 
                         MenuButton { label: "返回书架"; w: (menuContent.width - 6) / 3; onClicked: returnToShelf() }
+                        MenuButton { label: "搜索"; w: (menuContent.width - 6) / 3; onClicked: { closePanels(); openSearch(); } }
                         MenuButton { label: "章节"; w: (menuContent.width - 6) / 3; onClicked: { closePanels(); buildChapterList(); navigateTo("chapterList"); } }
                         MenuButton { label: "跳转"; w: (menuContent.width - 6) / 3; onClicked: openPanel("jump") }
                         MenuButton { label: "添加书签"; w: (menuContent.width - 6) / 3; onClicked: addBookmark() }
@@ -2951,6 +3058,231 @@ Rectangle {
                     }
 
                     Item { width: parent.width; height: 6 }
+                }
+            }
+        }
+    }
+
+    // ====== 全文搜索面板 ======
+    Rectangle {
+        id: searchPanel
+        visible: activePanel === "search"
+        anchors.fill: parent
+        color: bgColor
+        z: 40
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 6
+            spacing: 5
+
+            // 顶栏：返回 + 标题
+            Row {
+                width: parent.width
+                height: 24
+                spacing: 6
+
+                Rectangle {
+                    width: 50
+                    height: 24
+                    radius: 4
+                    color: "#DDDDDD"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "返回"
+                        font.pixelSize: 11
+                        color: "#333333"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: closePanels()
+                    }
+                }
+
+                Text {
+                    width: parent.width - 102
+                    height: 24
+                    text: "全文搜索"
+                    font.pixelSize: 13
+                    font.bold: true
+                    color: textColor
+                    verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignHCenter
+                    font.family: "Microsoft YaHei"
+                }
+
+                Rectangle {
+                    width: 40
+                    height: 24
+                    radius: 4
+                    color: "#EEEEEE"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "清空"
+                        font.pixelSize: 10
+                        color: "#333333"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: { searchQuery = ""; runSearch(""); }
+                    }
+                }
+            }
+
+            // 输入框（点击唤起键盘）
+            Rectangle {
+                width: parent.width
+                height: 28
+                radius: 4
+                color: "#FFFFFF"
+                border.color: "#CCCCCC"
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - 16
+                    text: searchQuery === "" ? "点击输入要搜索的内容…" : searchQuery
+                    font.pixelSize: 12
+                    color: searchQuery === "" ? "#AAAAAA" : "#333333"
+                    elide: Text.ElideRight
+                    font.family: "Microsoft YaHei"
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        showKeyboard(searchQuery, function (text) {
+                            runSearch(text);
+                        });
+                    }
+                }
+            }
+
+            // 选项：整词 / 区分大小写
+            Row {
+                width: parent.width
+                height: 22
+                spacing: 6
+
+                Rectangle {
+                    width: (parent.width - 6) / 2
+                    height: 22
+                    radius: 3
+                    color: searchWholeWord ? "#2f7dcc" : "#EEEEEE"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "整词匹配"
+                        font.pixelSize: 10
+                        color: searchWholeWord ? "#FFFFFF" : "#666666"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            searchWholeWord = !searchWholeWord;
+                            runSearch(searchQuery);
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: (parent.width - 6) / 2
+                    height: 22
+                    radius: 3
+                    color: searchCaseSensitive ? "#2f7dcc" : "#EEEEEE"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "区分大小写"
+                        font.pixelSize: 10
+                        color: searchCaseSensitive ? "#FFFFFF" : "#666666"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            searchCaseSensitive = !searchCaseSensitive;
+                            runSearch(searchQuery);
+                        }
+                    }
+                }
+            }
+
+            // 结果统计
+            Text {
+                width: parent.width
+                height: 16
+                visible: searchQuery !== ""
+                text: {
+                    if (searchTotal === 0) return "未找到匹配内容";
+                    var base = "共 " + searchTotal + " 处匹配";
+                    if (searchTruncated) base += "（仅显示前 " + searchResults.length + " 处）";
+                    return base;
+                }
+                font.pixelSize: 10
+                color: searchTotal === 0 && searchQuery !== "" ? "#D32F2F" : "#888888"
+                font.family: "Microsoft YaHei"
+            }
+
+            // 结果列表
+            ListView {
+                width: parent.width
+                height: parent.height - 190
+                clip: true
+                model: searchResults
+                spacing: 3
+                boundsBehavior: Flickable.StopAtBounds
+
+                delegate: Rectangle {
+                    width: ListView.view.width
+                    height: hitText.height + 12
+                    radius: 4
+                    color: "#F5F5F5"
+                    border.color: "#E0E0E0"
+
+                    Column {
+                        id: hitText
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: 6
+                        spacing: 2
+
+                        Text {
+                            width: parent.width
+                            text: "第 " + (Search.chapterIndexForLine(modelData.line, chapterBoundaries) + 1)
+                                  + " 章 · 第 " + (modelData.line + 1) + " 行"
+                            font.pixelSize: 9
+                            color: "#999999"
+                            font.family: "Microsoft YaHei"
+                        }
+
+                        // 命中片段：关键词用高亮色
+                        Text {
+                            width: parent.width
+                            textFormat: Text.StyledText
+                            font.pixelSize: 11
+                            color: textColor
+                            wrapMode: Text.Wrap
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
+                            font.family: "Microsoft YaHei"
+                            text: Search.highlightSegments(modelData.before + modelData.match + modelData.after,
+                                                           searchQuery, searchCaseSensitive)
+                                  .map(function (s) {
+                                      return s.isMatch
+                                          ? ("<font color='#D32F2F'><b>" + escapeHtml(s.text) + "</b></font>")
+                                          : escapeHtml(s.text);
+                                  }).join("")
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: jumpToSearchHit(modelData)
+                    }
                 }
             }
         }
