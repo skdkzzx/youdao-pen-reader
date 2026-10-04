@@ -201,7 +201,15 @@ Rectangle {
 
     readonly property string defaultBookFolder: "/userdisk/Music/小说/"
     readonly property string defaultBookSuffix: ".txt"
-    readonly property int readerMargin: 7
+    // 排版可调范围（集中定义，避免散落在界面代码里）
+    property int readerMargin: 7                 // 页边距（可调）
+    readonly property int FONT_MIN: 12
+    readonly property int FONT_MAX: 28
+    readonly property int FONT_DEFAULT: 15
+    readonly property int LINE_SPACING_MIN: 0
+    readonly property int LINE_SPACING_MAX: 12
+    readonly property int MARGIN_MIN: 2
+    readonly property int MARGIN_MAX: 20
 
     FontMetrics {
         id: readerFontMetrics
@@ -686,6 +694,7 @@ Rectangle {
             textColor: textColor,
             themeName: themeName,
             autoScrollSeconds: autoScrollSeconds,
+            readerMargin: readerMargin,
             scrollMode: scrollMode,
             tripleTapHome: tripleTapHome,
             chapterNameMode: chapterNameMode
@@ -695,7 +704,9 @@ Rectangle {
 
     function loadSettings() {
         var settings = Storage.loadSettingsFromStore();
-        baseFontSize = parseInt(settings.fontSize) || 15;
+        var fs = parseInt(settings.fontSize);
+        if (isNaN(fs)) fs = FONT_DEFAULT;
+        baseFontSize = Math.max(FONT_MIN, Math.min(FONT_MAX, fs));
         lineSpacing = parseInt(settings.lineSpacing) || 4;
         bgColor = settings.bgColor || "#FFFBF0";
         textColor = settings.textColor || "#333333";
@@ -713,6 +724,9 @@ Rectangle {
         }
         tripleTapHome = settings.tripleTapHome === true;
         chapterNameMode = settings.chapterNameMode || "scroll";
+        // 页边距（新增项，旧状态文件无此字段时用默认值）
+        var m = parseInt(settings.readerMargin);
+        readerMargin = (isNaN(m) ? 7 : Math.max(MARGIN_MIN, Math.min(MARGIN_MAX, m)));
         charsPerLine = ReaderUtils.updateCharsPerLine(baseFontSize);
     }
 
@@ -1717,6 +1731,55 @@ Rectangle {
         saveProgress();
         // 加载新章节
         loadChapter(newIdx);
+    }
+
+    // ====== 排版调节 ======
+
+    function stepFontSize(delta) {
+        var v = baseFontSize + delta;
+        if (v < FONT_MIN) v = FONT_MIN;
+        if (v > FONT_MAX) v = FONT_MAX;
+        if (v !== baseFontSize) setFontSize(v);
+    }
+
+    function stepLineSpacing(delta) {
+        var v = lineSpacing + delta;
+        if (v < LINE_SPACING_MIN) v = LINE_SPACING_MIN;
+        if (v > LINE_SPACING_MAX) v = LINE_SPACING_MAX;
+        if (v !== lineSpacing) {
+            lineSpacing = v;
+            rewrapCurrentChapter();
+            saveSettings();
+        }
+    }
+
+    function stepMargin(delta) {
+        var v = readerMargin + delta;
+        if (v < MARGIN_MIN) v = MARGIN_MIN;
+        if (v > MARGIN_MAX) v = MARGIN_MAX;
+        if (v !== readerMargin) {
+            readerMargin = v;
+            rewrapCurrentChapter();
+            saveSettings();
+        }
+    }
+
+    // 行距/边距变化后需要重新换行（每页容纳的行数变了），
+    // 但字符内容不变，因此按比例保持阅读位置。
+    function rewrapCurrentChapter() {
+        if (currentUrl === "" || currentChapterIdx < 0 || chapterBoundaries.length === 0)
+            return;
+        var ratio = lines.length > 0 ? (currentLine / lines.length) : 0;
+        var b = chapterBoundaries[currentChapterIdx];
+        var chapterRaw = rawLines.slice(b.startRaw, b.endRaw);
+        var result = ReaderUtils.wrapLines(chapterRaw, charsPerLine * 2 - 1);
+        lines = result.lines;
+        currentLine = Math.min(Math.floor(ratio * lines.length), maxStartLine());
+        clampCurrentLine();
+        updateScrollMax();
+        if (scrollMode) {
+            scrollFlickable.contentY = currentLine * getTextLineHeight();
+        }
     }
 
     function setFontSize(size) {
@@ -2992,33 +3055,76 @@ Rectangle {
                         }
                     }
 
-                    // 字号 + 行距 一行搞定
+                    // 字号：无级调节（12–28），左右加减
                     Row {
                         width: parent.width
-                        spacing: 6
-                        Row {
-                            spacing: 3
-                            Repeater {
-                                model: [{t:"小",v:13},{t:"中",v:15},{t:"大",v:18}]
-                                delegate: Rectangle {
-                                    width: 32; height: 20; radius: 3
-                                    color: baseFontSize === modelData.v ? "#2f7dcc" : "#EEEEEE"
-                                    Text { anchors.centerIn: parent; text: modelData.t; font.pixelSize: 9; color: baseFontSize === modelData.v ? "#fff" : "#333"; font.family: "Microsoft YaHei" }
-                                    MouseArea { anchors.fill: parent; onClicked: setFontSize(modelData.v) }
-                                }
-                            }
+                        height: 22
+                        spacing: 3
+                        Text {
+                            width: 46; height: 22
+                            text: "字号 " + baseFontSize
+                            font.pixelSize: 10; color: "#666"
+                            verticalAlignment: Text.AlignVCenter
+                            font.family: "Microsoft YaHei"
                         }
-                        Row {
-                            spacing: 3
-                            Repeater {
-                                model: [{t:"紧凑",v:2},{t:"标准",v:4},{t:"宽松",v:6}]
-                                delegate: Rectangle {
-                                    width: 40; height: 20; radius: 3
-                                    color: lineSpacing === modelData.v ? "#2f7dcc" : "#EEEEEE"
-                                    Text { anchors.centerIn: parent; text: modelData.t; font.pixelSize: 9; color: lineSpacing === modelData.v ? "#fff" : "#333"; font.family: "Microsoft YaHei" }
-                                    MouseArea { anchors.fill: parent; onClicked: { lineSpacing = modelData.v; clampCurrentLine(); saveSettings(); } }
-                                }
-                            }
+                        Rectangle {
+                            width: 30; height: 22; radius: 3
+                            color: baseFontSize <= FONT_MIN ? "#F0F0F0" : "#EEEEEE"
+                            Text { anchors.centerIn: parent; text: "－"; font.pixelSize: 13; color: baseFontSize <= FONT_MIN ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
+                            MouseArea { anchors.fill: parent; onClicked: stepFontSize(-1) }
+                        }
+                        Rectangle {
+                            width: 30; height: 22; radius: 3; color: "#EEEEEE"
+                            Text { anchors.centerIn: parent; text: "＋"; font.pixelSize: 13; color: baseFontSize >= FONT_MAX ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
+                            MouseArea { anchors.fill: parent; onClicked: stepFontSize(1) }
+                        }
+                        Rectangle {
+                            width: 46; height: 22; radius: 3; color: "#F5F5F5"
+                            Text { anchors.centerIn: parent; text: "重置"; font.pixelSize: 9; color: "#666"; font.family: "Microsoft YaHei" }
+                            MouseArea { anchors.fill: parent; onClicked: setFontSize(FONT_DEFAULT) }
+                        }
+                    }
+
+                    // 行距 / 页边距：独立调节
+                    Row {
+                        width: parent.width
+                        height: 22
+                        spacing: 3
+                        Text {
+                            width: 46; height: 22
+                            text: "行距 " + lineSpacing
+                            font.pixelSize: 10; color: "#666"
+                            verticalAlignment: Text.AlignVCenter
+                            font.family: "Microsoft YaHei"
+                        }
+                        Rectangle {
+                            width: 30; height: 22; radius: 3
+                            color: lineSpacing <= LINE_SPACING_MIN ? "#F0F0F0" : "#EEEEEE"
+                            Text { anchors.centerIn: parent; text: "－"; font.pixelSize: 13; color: lineSpacing <= LINE_SPACING_MIN ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
+                            MouseArea { anchors.fill: parent; onClicked: stepLineSpacing(-1) }
+                        }
+                        Rectangle {
+                            width: 30; height: 22; radius: 3; color: "#EEEEEE"
+                            Text { anchors.centerIn: parent; text: "＋"; font.pixelSize: 13; color: lineSpacing >= LINE_SPACING_MAX ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
+                            MouseArea { anchors.fill: parent; onClicked: stepLineSpacing(1) }
+                        }
+                        Text {
+                            width: 46; height: 22
+                            text: "边距 " + readerMargin
+                            font.pixelSize: 10; color: "#666"
+                            verticalAlignment: Text.AlignVCenter
+                            font.family: "Microsoft YaHei"
+                        }
+                        Rectangle {
+                            width: 30; height: 22; radius: 3
+                            color: readerMargin <= MARGIN_MIN ? "#F0F0F0" : "#EEEEEE"
+                            Text { anchors.centerIn: parent; text: "－"; font.pixelSize: 13; color: readerMargin <= MARGIN_MIN ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
+                            MouseArea { anchors.fill: parent; onClicked: stepMargin(-1) }
+                        }
+                        Rectangle {
+                            width: 30; height: 22; radius: 3; color: "#EEEEEE"
+                            Text { anchors.centerIn: parent; text: "＋"; font.pixelSize: 13; color: readerMargin >= MARGIN_MAX ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
+                            MouseArea { anchors.fill: parent; onClicked: stepMargin(1) }
                         }
                     }
 
