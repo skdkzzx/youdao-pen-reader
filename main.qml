@@ -146,6 +146,8 @@ Rectangle {
             return settingsPage;
         if (mode === "chapterList")
             return chapterListPage;
+        if (mode === "stats")
+            return statsPage;
         return null;
     }
 
@@ -158,6 +160,7 @@ Rectangle {
     property string shelfSort: BookList.SORT_RECENT
     property string shelfFilter: BookList.FILTER_ALL
     property var shelfSource: []     // 未过滤的完整列表
+    property int statsRefreshKey: 0  // 改变时触发统计页重算
     property var bookmarkList: []
     property var progressStore: ({})
     property var bookmarksStore: ({})
@@ -747,6 +750,50 @@ Rectangle {
         shelfSource = ReaderUtils.buildBookList(folderScanAvailable, bookFolderModel, progressStore, defaultBookFolder);
         bookListTotal = ReaderUtils.getBookListTotal();
         applyShelfView();
+    }
+
+    // ====== 阅读统计 ======
+
+    // 汇总所有书籍的阅读记录
+    function readingSummary() {
+        var records = [];
+        for (var url in progressStore) {
+            var r = progressStore[url];
+            if (!r) continue;
+            records.push({
+                readingTime: parseInt(r.readingTime) || 0,
+                bookPercent: parseInt(r.bookPercent) || 0,
+                timestamp: parseInt(r.timestamp) || 0
+            });
+        }
+        return Stats.summarize(records);
+    }
+
+    // 统计页展示用的条目（已格式化）
+    function statsRows() {
+        var s = readingSummary();
+        var counts = shelfFilterCounts();
+        return [
+            { k: "累计阅读", v: Stats.formatDuration(s.totalSeconds) },
+            { k: "阅读天数", v: s.activeDays + " 天" },
+            { k: "日均阅读", v: s.activeDays > 0 ? Stats.formatDuration(s.avgSecondsPerDay) : "—" },
+            { k: "在读书籍", v: s.bookCount + " 本" },
+            { k: "已读完", v: s.finishedCount + " 本" },
+            { k: "书架藏书", v: counts.all + " 本" },
+            { k: "未读", v: counts.unread + " 本" },
+            { k: "在读", v: counts.reading + " 本" }
+        ];
+    }
+
+    // 本机实测阅读速度（用于校准剩余时间预估）
+    function statsSpeedText() {
+        if (readingSpeed > 0) return readingSpeed + " 字/分（本机实测）";
+        return Stats.DEFAULT_CHARS_PER_MINUTE + " 字/分（默认值，读满 1 分钟后自动校准）";
+    }
+
+    function openStats() {
+        statsRefreshKey++;
+        navigateTo("stats");
     }
 
     // 应用排序与筛选，生成最终展示列表
@@ -2743,6 +2790,177 @@ Rectangle {
         }
     }
 
+    // ====== 阅读统计页面 ======
+    Item {
+        id: statsPage
+        anchors.fill: parent
+        visible: pageMode === "stats"
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 6
+            spacing: 5
+
+            Row {
+                width: parent.width
+                height: 24
+                spacing: 6
+
+                Rectangle {
+                    width: 50
+                    height: 24
+                    radius: 4
+                    color: "#DDDDDD"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "返回"
+                        font.pixelSize: 11
+                        color: "#333333"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: navigateBack()
+                    }
+                }
+
+                Text {
+                    width: parent.width - 102
+                    height: 24
+                    text: "阅读统计"
+                    font.pixelSize: 13
+                    font.bold: true
+                    color: textColor
+                    verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignHCenter
+                    font.family: "Microsoft YaHei"
+                }
+
+                Rectangle {
+                    width: 40
+                    height: 24
+                    radius: 4
+                    color: "#F0F0F0"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "刷新"
+                        font.pixelSize: 10
+                        color: "#666"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: { statsRefreshKey++; }
+                    }
+                }
+            }
+
+            Flickable {
+                width: parent.width
+                height: parent.height - 30
+                contentWidth: width
+                contentHeight: statsCol.height
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
+                Column {
+                    id: statsCol
+                    width: parent.width
+                    spacing: 4
+
+                    Text {
+                        width: parent.width
+                        text: "阅读概况"
+                        font.pixelSize: 11
+                        font.bold: true
+                        color: textColor
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Repeater {
+                        // 依赖 statsRefreshKey，点「刷新」或重新进入时重算
+                        model: statsRefreshKey >= 0 ? statsRows() : []
+                        delegate: Rectangle {
+                            width: statsCol.width
+                            height: 26
+                            radius: 3
+                            color: "#F8F4EC"
+                            border.color: "#E0D8C8"
+
+                            Row {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+
+                                Text {
+                                    width: parent.width * 0.55
+                                    text: modelData.k
+                                    font.pixelSize: 11
+                                    color: "#666"
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    font.family: "Microsoft YaHei"
+                                }
+                                Text {
+                                    width: parent.width * 0.45
+                                    text: modelData.v
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                    color: "#2f7dcc"
+                                    horizontalAlignment: Text.AlignRight
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    font.family: "Microsoft YaHei"
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
+
+                    Text {
+                        width: parent.width
+                        text: "阅读速度"
+                        font.pixelSize: 11
+                        font.bold: true
+                        color: textColor
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: statsSpeedText()
+                        font.pixelSize: 10
+                        color: "#888"
+                        wrapMode: Text.WordWrap
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
+
+                    Text {
+                        width: parent.width
+                        text: "说明"
+                        font.pixelSize: 11
+                        font.bold: true
+                        color: textColor
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: "· 阅读时长在阅读时自动累计，每 5 秒保存一次\n"
+                              + "· 阅读天数为有阅读记录的自然日天数\n"
+                              + "· 速度用于估算剩余阅读时间，样本不足时用默认值"
+                        font.pixelSize: 9
+                        color: "#999"
+                        lineHeight: 1.4
+                        wrapMode: Text.WordWrap
+                        font.family: "Microsoft YaHei"
+                    }
+                }
+            }
+        }
+    }
+
     Item {
         id: settingsPage
         anchors.fill: parent
@@ -2829,6 +3047,27 @@ Rectangle {
                         color: "#888"
                         wrapMode: Text.WordWrap
                         font.family: "Microsoft YaHei"
+                    }
+
+                    // 阅读统计入口
+                    Rectangle {
+                        width: parent.width
+                        height: 28
+                        radius: 3
+                        color: "#E3F2FD"
+                        border.color: "#BBDEFB"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "阅读统计 ›"
+                            font.pixelSize: 11
+                            color: "#1565C0"
+                            font.family: "Microsoft YaHei"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: openStats()
+                        }
                     }
 
                     // 手势设置
