@@ -423,17 +423,75 @@ function findChapterIndex(chapterList, currentLine) {
     return idx;
 }
 
+// ====== 主题 ======
+//
+// 每个主题包含 6 个颜色槽位。原实现只有 bg/fg 两个，
+// 导致深色主题下界面其余部分（卡片、边框、次要文字）仍是浅色，
+// 夜间模式下刺眼。现补齐：
+//   bg      主背景
+//   fg      正文颜色
+//   card    卡片/面板底（书架行、设置项）
+//   border  边框
+//   sub     次要文字（进度、提示）
+//   accent  强调色（选中态、进度条）
+//
+// dark 标记用于判断是否需要深色适配（如字幕底衬、图标反色）。
+
+var _themes = {
+    "默认": { bg: "#FFFBF0", fg: "#333333", card: "#F8F4EC", border: "#E0D8C8",
+              sub: "#888888", accent: "#2f7dcc", dark: false },
+    "白色": { bg: "#FFFFFF", fg: "#333333", card: "#F5F5F5", border: "#E0E0E0",
+              sub: "#888888", accent: "#2f7dcc", dark: false },
+    "黄色": { bg: "#FFF8E1", fg: "#5D4037", card: "#FFF3CD", border: "#F0E0B0",
+              sub: "#8D6E63", accent: "#E65100", dark: false },
+    "绿色": { bg: "#E8F5E9", fg: "#2E7D32", card: "#DFF0E0", border: "#C8E6C9",
+              sub: "#558B2F", accent: "#2E7D32", dark: false },
+    "黑色": { bg: "#263238", fg: "#ECEFF1", card: "#2F3A42", border: "#3E4C56",
+              sub: "#90A4AE", accent: "#4FC3F7", dark: true },
+    "粉色": { bg: "#FCE4EC", fg: "#880E4F", card: "#F8D7E3", border: "#F0C8D8",
+              sub: "#AD5C7B", accent: "#C2185B", dark: false },
+    "蓝色": { bg: "#E3F2FD", fg: "#1565C0", card: "#D6EAFA", border: "#BBDEFB",
+              sub: "#5C8FC4", accent: "#1565C0", dark: false },
+    // 新增：护眼米黄（低对比度，长时间阅读）
+    "米黄": { bg: "#F5EEDC", fg: "#4A4034", card: "#EDE4CE", border: "#DCCFB4",
+              sub: "#8A7D68", accent: "#8B6F47", dark: false },
+    // 新增：纯黑 OLED（真黑，省电且夜间不刺眼）
+    "暗黑": { bg: "#000000", fg: "#C8C8C8", card: "#141414", border: "#2A2A2A",
+              sub: "#707070", accent: "#64B5F6", dark: true },
+    // 新增：深灰（比纯黑柔和，适合夜间）
+    "深灰": { bg: "#1C1C1E", fg: "#D0D0D2", card: "#2C2C2E", border: "#3A3A3C",
+              sub: "#8E8E93", accent: "#5AC8FA", dark: true }
+};
+
+// 主题名列表（供界面遍历，顺序即显示顺序）
+function themeNames() {
+    return ["默认", "白色", "米黄", "黄色", "绿色", "蓝色", "粉色",
+            "黑色", "深灰", "暗黑"];
+}
+
+// 全部主题（供需要遍历颜色定义的场景）
+function allThemes() {
+    return _themes;
+}
+
 function getThemeColors(name) {
-    var themes = {
-        "默认": { bg: "#FFFBF0", fg: "#333333" },
-        "白色": { bg: "#FFFFFF", fg: "#333333" },
-        "黄色": { bg: "#FFF8E1", fg: "#5D4037" },
-        "绿色": { bg: "#E8F5E9", fg: "#2E7D32" },
-        "黑色": { bg: "#263238", fg: "#ECEFF1" },
-        "粉色": { bg: "#FCE4EC", fg: "#880E4F" },
-        "蓝色": { bg: "#E3F2FD", fg: "#1565C0" }
-    };
-    return themes[name] || themes["默认"];
+    return _themes[name] || _themes["默认"];
+}
+
+// 是否为深色主题（用于适配需要反色的元素）
+function isDarkTheme(name) {
+    var t = _themes[name];
+    return t ? t.dark === true : false;
+}
+
+// 取主题的某个槽位，缺失时回退到 bg/fg，保证旧数据不出错
+function themeColor(name, slot) {
+    var t = getThemeColors(name);
+    if (t[slot] !== undefined) return t[slot];
+    if (slot === "card" || slot === "border") return t.bg;
+    if (slot === "sub") return t.fg;
+    if (slot === "accent") return t.fg;
+    return t.bg;
 }
 
 // 从上传服务日志中提取 URL
