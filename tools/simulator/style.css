@@ -9,6 +9,8 @@
   --fg: #333333; /* 默认主题文字 */
   --accent: #2f7dcc;
   --border: #E0D8C8;
+  --card: #F8F4EC;
+  --sub: #888888;
 }
 
 *{box-sizing:border-box;margin:0;padding:0}
@@ -81,8 +83,8 @@ html,body{
   min-width:50px;
   padding:0 6px;
   border-radius:4px;
-  background:#DDDDDD;
-  color:#333;
+  background:var(--card);
+  color:var(--fg);
   font-size:11px;
   display:flex;
   align-items:center;
@@ -115,7 +117,7 @@ html,body{
   min-height:0;
 }
 .list::-webkit-scrollbar{width:4px}
-.list::-webkit-scrollbar-thumb{background:#ccc;border-radius:2px}
+.list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 
 .row{
   display:flex;
@@ -131,8 +133,8 @@ html,body{
 /* 输入框 */
 .input{
   height:26px;
-  background:#fff;
-  border:1px solid #ccc;
+  background:var(--card);
+  border:1px solid var(--border);
   border-radius:4px;
   display:flex;
   align-items:center;
@@ -143,12 +145,12 @@ html,body{
   flex-shrink:0;
   gap:4px;
 }
-.input .ph{color:#aaa}
+.input .ph{color:var(--sub)}
 .input .val{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .input .clear{
-  width:20px;height:20px;border-radius:3px;background:#f0f0f0;
+  width:20px;height:20px;border-radius:3px;background:var(--bg);
   display:flex;align-items:center;justify-content:center;
-  color:#888;font-size:13px;flex-shrink:0;
+  color:var(--sub);font-size:13px;flex-shrink:0;
 }
 
 /* 标签行 */
@@ -156,8 +158,8 @@ html,body{
 .chip{
   height:22px;
   border-radius:3px;
-  background:#eee;
-  color:#666;
+  background:var(--card);
+  color:var(--sub);
   font-size:9px;
   display:flex;align-items:center;justify-content:center;
   cursor:pointer;
