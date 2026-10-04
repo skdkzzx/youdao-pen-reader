@@ -2,6 +2,7 @@ import QtQuick 2.15
 import "qrc:/qml/commons"
 import "Storage.js" as Storage
 import "ReaderUtils.js" as ReaderUtils
+import "Encoding.js" as Encoding
 
 Rectangle {
     id: root
@@ -41,6 +42,14 @@ Rectangle {
     property string bgColor: "#FFFBF0"
     property string textColor: "#333333"
     property string themeName: "默认"
+    property string detectedEncoding: ""      // 当前书籍检测到的编码
+    property bool encodingConverting: false   // 正在转码（显示提示用）
+    property string encodingNotice: ""        // 转码完成后的提示文案
+    property string encodingProbeUrl: ""      // 正在探测编码的书籍
+    property int encodingProbeRetry: 0
+    property string encodingConvertUrl: ""
+    property string encodingConvertTarget: ""
+    property int encodingConvertRetry: 0
     property bool autoScroll: false
     property int autoScrollSeconds: 2
     property bool animating: false
@@ -216,6 +225,24 @@ Rectangle {
         interval: 700
         repeat: false
         onTriggered: startUploaderService()
+    }
+
+    // 编码探测轮询（300ms，最多 20 次 = 6 秒）
+    Timer {
+        id: encodingProbeTimer
+        interval: 300
+        repeat: true
+        running: false
+        onTriggered: pollEncodingResult()
+    }
+
+    // 转码结果轮询（250ms，最多 40 次 = 10 秒）
+    Timer {
+        id: encodingConvertTimer
+        interval: 250
+        repeat: true
+        running: false
+        onTriggered: pollEncodingConvert()
     }
 
     Timer {
@@ -1024,6 +1051,15 @@ Rectangle {
             flushProgress();
         }
 
+        // 取消上一本书残留的编码探测/转码任务，避免回调污染新书籍
+        encodingProbeTimer.stop();
+        encodingConvertTimer.stop();
+        encodingProbeUrl = "";
+        encodingConvertUrl = "";
+        encodingConverting = false;
+        encodingProbeRetry = 0;
+        encodingConvertRetry = 0;
+
         if (xhr && xhr.readyState === XMLHttpRequest.LOADING) {
             xhr.abort();
             xhr = null;
@@ -1043,11 +1079,141 @@ Rectangle {
 
         isLoading = true;
         statusMessage = "";
+        detectedEncoding = "";
+        encodingNotice = "";
 
-        var encodedUrl = encodePath(url);
-        doLoadFile(url, encodedUrl);
+        // 先检测编码：GBK/BIG5/UTF-16 的 txt 若直接按 UTF-8 读取会变乱码，
+        // 需要先转码为 UTF-8 的临时文件再加载。
+        detectEncodingThenLoad(url);
     }
 
+    // ====== 编码检测与转码 ======
+
+    // ====== 编码检测与转码 ======
+    //
+    // 流程：探测编码 → 若非 UTF-8 则转码到临时文件 → 加载（临时文件或原文件）
+    // shellPluginController 无输出回传，因此通过「命令写结果文件 + 轮询读取」获取结论。
+    // 轮询用异步 XHR，避免阻塞渲染线程。
+
+    function detectEncodingThenLoad(url) {
+        var ctrl = (typeof shellPluginController !== "undefined") ? shellPluginController : null;
+        if (!ctrl) {
+            // 无 shell 能力（如预览环境）时退回原逻辑，仅支持 UTF-8
+            doLoadFile(url, encodePath(url));
+            return;
+        }
+        encodingProbeUrl = url;
+        encodingProbeRetry = 0;
+        encodingProbeTimer.start();
+        try {
+            ctrl.sendCommand(Encoding.buildDetectToFileCommand(url));
+        } catch (e) {
+            // 探测命令失败不阻塞阅读，直接按 UTF-8 打开
+            encodingProbeTimer.stop();
+            doLoadFile(url, encodePath(url));
+        }
+    }
+
+    // 轮询探测结果文件
+    function pollEncodingResult() {
+        if (encodingProbeUrl === "")
+            return;
+        var ctrl = (typeof shellPluginController !== "undefined") ? shellPluginController : null;
+        if (!ctrl) {
+            encodingProbeTimer.stop();
+            doLoadFile(encodingProbeUrl, encodePath(encodingProbeUrl));
+            return;
+        }
+        // 用 cat 把结果文件内容送到 QML 可见的位置（读文件走 XHR）
+        var rp = Encoding.resultPathFor(encodingProbeUrl);
+        _readTextFile(rp, function (text) {
+            if (encodingProbeUrl === "") return;   // 期间已切换书籍
+            var enc = Encoding.parseResultFile(text);
+            if (enc === "" && encodingProbeRetry < 20) {
+                encodingProbeRetry++;   // 命令尚未执行完，继续等
+                return;
+            }
+            encodingProbeTimer.stop();
+            applyEncoding(encodingProbeUrl, enc);
+        });
+    }
+
+    // 依据探测结果决定「直接加载」还是「先转码再加载」
+    function applyEncoding(url, enc) {
+        detectedEncoding = enc;
+        if (!Encoding.needConvert(enc)) {
+            doLoadFile(url, encodePath(url));
+            return;
+        }
+        var ctrl = (typeof shellPluginController !== "undefined") ? shellPluginController : null;
+        if (!ctrl) {
+            doLoadFile(url, encodePath(url));
+            return;
+        }
+        encodingConverting = true;
+        statusMessage = "正在转换编码（" + Encoding.encodingLabel(enc) + "）…";
+        var converted = Encoding.tempPathFor(url);
+        try {
+            ctrl.sendCommand(Encoding.buildConvertCommand(url, enc));
+        } catch (e) {
+            encodingConverting = false;
+            doLoadFile(url, encodePath(url));
+            return;
+        }
+        encodingConvertUrl = url;
+        encodingConvertTarget = converted;
+        encodingConvertRetry = 0;
+        encodingConvertTimer.start();
+    }
+
+    // 轮询转码结果（转换完成后直接读临时文件）
+    function pollEncodingConvert() {
+        if (encodingConvertUrl === "")
+            return;
+        if (encodingConvertRetry++ > 40) {
+            // 超时：退回原文件，至少能打开（可能乱码）
+            encodingConvertTimer.stop();
+            encodingConverting = false;
+            statusMessage = "编码转换超时，已按原样打开";
+            doLoadFile(encodingConvertUrl, encodePath(encodingConvertUrl));
+            encodingConvertUrl = "";
+            return;
+        }
+        var target = encodingConvertTarget;
+        _readTextFile(target, function (text) {
+            if (encodingConvertUrl === "") return;
+            if (text === "") return;   // 尚未生成，继续等
+            encodingConvertTimer.stop();
+            encodingConverting = false;
+            encodingNotice = "已自动转换为 " + Encoding.encodingLabel(detectedEncoding);
+            var u = encodingConvertUrl;
+            encodingConvertUrl = "";
+            // 加载转码后的临时文件（此时必为 UTF-8）
+            doLoadFile(u, encodePath("file://" + target));
+        });
+    }
+
+    // 异步读取文本文件（不阻塞 UI）；失败或不存在时回调空串
+    function _readTextFile(path, callback) {
+        try {
+            var xhr2 = new XMLHttpRequest();
+            xhr2.open("GET", "file://" + path, true);
+            xhr2.onreadystatechange = function () {
+                if (xhr2.readyState !== XMLHttpRequest.DONE) return;
+                var t = "";
+                if (xhr2.status === 200 || xhr2.status === 0)
+                    t = xhr2.responseText || "";
+                callback(t);
+            };
+            xhr2.onerror = function () { callback(""); };
+            xhr2.send();
+        } catch (e) {
+            callback("");
+        }
+    }
+
+    // originalUrl 始终是「原书路径」——进度、书签都以它为键，
+    // 不能因转码临时文件而改变键值。
     function doLoadFile(originalUrl, requestUrl) {
         var reqId = ++currentRequestId;
         xhr = new XMLHttpRequest();
@@ -1062,7 +1228,9 @@ Rectangle {
                     content = content.substring(1);
                 // processContent 会将后续初始化移至 afterContentLoaded（同步小文件/异步大文件）
                 processContent(content);
-            } else if (requestUrl !== originalUrl) {
+            } else if (requestUrl !== originalUrl && encodingConvertTarget === "") {
+                // 路径编码回退：仅当不是「转码临时文件」时才重试原路径，
+                // 否则会拿乱码文件再试一次，无意义且可能死循环
                 doLoadFile(originalUrl, originalUrl);
                 return;
             } else {
@@ -1070,7 +1238,7 @@ Rectangle {
                 lines = [];
                 chapterList = [];
                 currentLine = 0;
-                statusMessage = "无法打开文件";
+                statusMessage = encodingConverting ? "编码转换失败" : "无法打开文件";
             }
             xhr = null;
         };
@@ -3292,6 +3460,35 @@ Rectangle {
         color: "#D32F2F"
         z: 100
         font.family: "Microsoft YaHei"
+    }
+
+    // 编码自动转换完成后的提示（信息性，用中性色，自动消失）
+    Rectangle {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: 8
+        width: Math.min(parent.width - 24, encodingNoticeText.implicitWidth + 20)
+        height: 26
+        radius: 13
+        color: "#263238"
+        opacity: 0.92
+        visible: encodingNotice !== ""
+        z: 101
+
+        Text {
+            id: encodingNoticeText
+            anchors.centerIn: parent
+            text: encodingNotice
+            font.pixelSize: 11
+            color: "#ECEFF1"
+            font.family: "Microsoft YaHei"
+        }
+
+        Timer {
+            running: encodingNotice !== ""
+            interval: 2600
+            onTriggered: encodingNotice = ""
+        }
     }
 
     SponsorDialog {
