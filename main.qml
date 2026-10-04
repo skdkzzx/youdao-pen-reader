@@ -936,6 +936,11 @@ Rectangle {
     }
 
     function addBookmark() {
+        addBookmarkWithNote("");
+    }
+
+    // 新增书签，可附带备注。note 为空时行为与原来一致。
+    function addBookmarkWithNote(note) {
         if (currentUrl === "")
             return;
         var preview = lines.length > currentLine ? String(lines[currentLine]).trim() : "";
@@ -950,8 +955,10 @@ Rectangle {
             line: currentLine,
             linesTotal: lines.length,   // 创建时的总行数（用于字号缩放后比例调整）
             chapterIdx: currentChapterIdx,
-            percent: getProgressPercent(),
-            preview: preview
+            percent: getBookPercent(),
+            preview: preview,
+            note: String(note || ""),   // 用户备注
+            created: new Date().getTime()
         });
         bookmarksStore[currentUrl] = items;
         if (writeState("bookmarks", JSON.stringify(bookmarksStore))) {
@@ -961,6 +968,75 @@ Rectangle {
             statusMessage = "添加书签失败";
             messageTimer.restart();
         }
+    }
+
+    // 编辑某条书签的备注
+    function editBookmarkNote(id) {
+        if (currentUrl === "")
+            return;
+        var items = bookmarksStore[currentUrl] || [];
+        var target = null;
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].id === id) { target = items[i]; break; }
+        }
+        if (!target) return;
+        showKeyboard(target.note || "", function (text) {
+            target.note = String(text || "");
+            if (writeState("bookmarks", JSON.stringify(bookmarksStore))) {
+                loadBookmarkList();
+                showToast("备注已保存");
+            } else {
+                statusMessage = "备注保存失败";
+                messageTimer.restart();
+            }
+        });
+    }
+
+    // 导出当前书籍的书签为文本文件
+    function exportBookmarks() {
+        if (currentUrl === "" || bookmarkList.length === 0) {
+            showToast("没有可导出的书签");
+            return;
+        }
+        var ctrl = (typeof shellPluginController !== "undefined") ? shellPluginController : null;
+        if (!ctrl) {
+            showToast("当前环境不支持导出");
+            return;
+        }
+        var text = buildBookmarkExport();
+        // 用 base64 传输，避免内容中的引号/换行破坏 shell 命令
+        var b64 = Qt.btoa(unescape(encodeURIComponent(text)));
+        var safe = b64.replace(/'/g, "'\\''");
+        var out = "/userdisk/" + sanitizeFileName(fileName) + "-书签.txt";
+        ctrl.sendCommand("mkdir -p /userdisk 2>/dev/null; "
+            + "printf '%s' '" + safe + "' | base64 -d > " + shellEscape(out) + " 2>/dev/null; "
+            + "[ -s " + shellEscape(out) + " ] && echo OK || echo FAIL");
+        showToast("已导出到 " + out);
+    }
+
+    // 生成书签导出文本
+    function buildBookmarkExport() {
+        var t = "《" + fileName + "》书签\n";
+        t += "导出时间：" + new Date().toLocaleString() + "\n";
+        t += "共 " + bookmarkList.length + " 条\n";
+        t += "----------------------------------------\n";
+        for (var i = 0; i < bookmarkList.length; i++) {
+            var b = bookmarkList[i];
+            var ch = parseInt(b.chapterIdx);
+            t += (i + 1) + ". ";
+            if (!isNaN(ch) && ch >= 0 && ch < chapterBoundaries.length)
+                t += "【" + chapterBoundaries[ch].title + "】";
+            t += " 进度 " + (parseInt(b.percent) || 0) + "%\n";
+            if (b.preview) t += "   原文：" + b.preview + "\n";
+            if (b.note) t += "   备注：" + b.note + "\n";
+            t += "\n";
+        }
+        return t;
+    }
+
+    // 文件名安全化（去掉路径分隔符等）
+    function sanitizeFileName(name) {
+        return String(name || "book").replace(/[\/:*?"<>|]/g, "_");
     }
 
     function deleteBookmark(id) {
@@ -3989,9 +4065,9 @@ Rectangle {
                     font.family: "Microsoft YaHei"
                 }
                 Rectangle {
-                    width: 40; height: 24; radius: 4; color: "#DDDDDD"
-                    Text { anchors.centerIn: parent; text: "x"; font.pixelSize: 11; color: "#333"; font.family: "Microsoft YaHei" }
-                    MouseArea { anchors.fill: parent; onClicked: closePanels() }
+                    width: 40; height: 24; radius: 4; color: "#E3F2FD"; border.color: "#BBDEFB"
+                    Text { anchors.centerIn: parent; text: "导出"; font.pixelSize: 10; color: "#1565C0"; font.family: "Microsoft YaHei" }
+                    MouseArea { anchors.fill: parent; onClicked: exportBookmarks() }
                 }
                 }
             }
@@ -4011,7 +4087,8 @@ Rectangle {
 
                 delegate: Rectangle {
                     width: parent.width
-                    height: 36
+                    // 有备注时多留一行
+                    height: (modelData.note && modelData.note !== "") ? 50 : 36
                     radius: 4
                     color: bmMouse.pressed ? "#E0D8C8" : "#F5F0E8"
                     border.color: "#DDDDDD"
@@ -4039,7 +4116,7 @@ Rectangle {
                     Column {
                         anchors.left: parent.left
                         anchors.leftMargin: 8
-                        anchors.right: deleteButton.left
+                        anchors.right: noteButton.left
                         anchors.rightMargin: 6
                         anchors.verticalCenter: parent.verticalCenter
                         Text {
@@ -4055,6 +4132,39 @@ Rectangle {
                             color: "#888"
                             elide: Text.ElideRight
                             font.family: "Microsoft YaHei"
+                        }
+                        Text {
+                            width: parent.width
+                            visible: modelData.note && modelData.note !== ""
+                            text: "备注：" + (modelData.note || "")
+                            font.pixelSize: 9
+                            color: "#2E7D32"
+                            elide: Text.ElideRight
+                            font.family: "Microsoft YaHei"
+                        }
+                    }
+
+                    Rectangle {
+                        id: noteButton
+                        anchors.right: deleteButton.left
+                        anchors.rightMargin: 4
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 30
+                        height: 20
+                        radius: 3
+                        color: "#FFF3E0"
+                        border.color: "#FFCC80"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "备注"
+                            font.pixelSize: 9
+                            color: "#E65100"
+                            font.family: "Microsoft YaHei"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: editBookmarkNote(modelData.id)
                         }
                     }
 
