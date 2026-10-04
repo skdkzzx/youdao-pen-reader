@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>词典笔界面模拟器 · 电子书阅读器</title>
+<link rel="stylesheet" href="style.css?v=4">
+</head>
+<body>
+
+<div class="device">
+  <div class="screen" id="screen"></div>
+</div>
+
+<div class="panel">
+  <h3>导航模拟</h3>
+  <div class="ctrl-row">
+    <div class="ctrl" onclick="showPage('home')">首页</div>
+    <div class="ctrl" onclick="showPage('shelf')">书架</div>
+    <div class="ctrl" onclick="showPage('reader')">阅读器</div>
+    <div class="ctrl" onclick="showPage('settings')">设置</div>
+    <div class="ctrl" onclick="openPanel('stats')">阅读统计</div>
+  </div>
+
+  <h3>面板模拟</h3>
+  <div class="ctrl-row">
+    <div class="ctrl" onclick="openPanel('menu')">主菜单</div>
+    <div class="ctrl" onclick="openPanel('search')">全文搜索</div>
+    <div class="ctrl" onclick="openPanel('bookmarks')">书签</div>
+    <div class="ctrl" onclick="closePanel()">关闭面板</div>
+  </div>
+
+  <h3>翻页模拟（阅读器页生效）</h3>
+  <div class="ctrl-row">
+    <div class="ctrl" onclick="nextPage(-6)">← 上一页</div>
+    <div class="ctrl" onclick="nextPage(6)">下一页 →</div>
+    <div class="ctrl" onclick="state.line=0;render()">回到开头</div>
+  </div>
+
+  <h3>布局度量（320×170 实测）</h3>
+  <div id="metrics"></div>
+
+  <div class="note" style="margin-top:12px">
+    <p style="margin-bottom:6px">
+      这是一个 <b>HTML 还原的界面模拟器</b>，不是真的在跑 QML ——
+      iSH 里装不了 Qt 图形栈。布局参数（页面结构、尺寸、文案）取自
+      <code>main.qml</code>，在 320×170 的真实视口下渲染，用于检查
+      「在这个屏幕上放不放得下、看不看得清」。
+    </p>
+    <p style="margin-bottom:6px">
+      交互是简化的：翻页、切页、切面板可用；文本换行按字号与行高估算，
+      与 Qt 的实际断行算法会有细微差异。键盘 <code>←</code>/<code>→</code>
+      翻页，<code>Esc</code> 关面板。
+    </p>
+    <p style="margin-bottom:6px">
+      <b>这个模拟器已经发现并修掉两个真问题</b>：
+    </p>
+    <p style="margin-bottom:6px">
+      <b>① 阅读器正文被压住</b> —— <code>getLinesPerPage</code> 只减了上下边距，
+      没扣除底部状态栏，最后一行与状态栏重叠。<br>
+      已修：新增 <code>statusBarHeight</code> 参数，正文与滚动模式的
+      bottomMargin 同步扣除，并补上定高 14px 的状态栏。
+    </p>
+    <p>
+      <b>② 书架列表被工具栏挤没</b> —— 搜索框 + 筛选 + 排序共占 116px，
+      170px 屏上只剩 22px 给列表（约 0 本书）。<br>
+      已修：搜索并入顶栏、排序改单键循环，固定占用降到 98px，列表可用 60px。
+    </p>
+  </div>
+</div>
+
+<script src="app.js?v=4"></script>
+</body>
+</html>
