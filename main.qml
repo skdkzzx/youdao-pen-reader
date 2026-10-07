@@ -2,6 +2,9 @@ import QtQuick 2.15
 import "qrc:/qml/commons"
 import "Storage.js" as Storage
 import "ReaderUtils.js" as ReaderUtils
+import "Encoding.js" as Encoding
+import "ReadingStats.js" as Stats
+import "Search.js" as Search
 
 Rectangle {
     id: root
@@ -41,6 +44,34 @@ Rectangle {
     property string bgColor: "#FFFBF0"
     property string textColor: "#333333"
     property string themeName: "默认"
+    property string detectedEncoding: ""      // 当前书籍检测到的编码
+    property bool encodingConverting: false   // 正在转码（显示提示用）
+    property string encodingNotice: ""        // 转码完成后的提示文案
+    // ====== 进度与阅读速度（用于剩余时间估算）======
+    // 字符偏移是稳定的进度度量：行号会随字号/行距变化，字符偏移不会。
+    property int chapterCharCount: 0          // 当前章节总字符数
+    property var chapterCharOffsets: []       // 每章起始字符偏移 [{start, chars}]
+    property int chapterCharsBefore: 0        // 当前章节之前的累计字符数
+    property int bookCharTotal: 0             // 全书总字符数
+    property int readingSpeed: 0              // 实测阅读速度（字符/分），0=未测得
+    property double sessionCharsAtStart: 0    // 本次会话开始时的字符偏移
+    property double sessionStartMs: 0         // 本次会话开始的时间戳
+
+    // ====== 全文搜索 ======
+    property string searchQuery: ""           // 用户输入的关键词
+    property var searchResults: []            // 命中结果
+    property int searchTotal: 0               // 命中总数（可能超过显示上限）
+    property bool searchTruncated: false
+    property bool searchWholeWord: false
+    property bool searchCaseSensitive: false
+    property string searchDate: ""            // 记忆上次搜索的时间（可选）
+    property double pendingSearchRatio: -1    // 跨章跳转时待定位的比例
+
+    property string encodingProbeUrl: ""      // 正在探测编码的书籍
+    property int encodingProbeRetry: 0
+    property string encodingConvertUrl: ""
+    property string encodingConvertTarget: ""
+    property int encodingConvertRetry: 0
     property bool autoScroll: false
     property int autoScrollSeconds: 2
     property bool animating: false
@@ -170,7 +201,15 @@ Rectangle {
 
     readonly property string defaultBookFolder: "/userdisk/Music/小说/"
     readonly property string defaultBookSuffix: ".txt"
-    readonly property int readerMargin: 7
+    // 排版可调范围（集中定义，避免散落在界面代码里）
+    property int readerMargin: 7                 // 页边距（可调）
+    readonly property int FONT_MIN: 12
+    readonly property int FONT_MAX: 28
+    readonly property int FONT_DEFAULT: 15
+    readonly property int LINE_SPACING_MIN: 0
+    readonly property int LINE_SPACING_MAX: 12
+    readonly property int MARGIN_MIN: 2
+    readonly property int MARGIN_MAX: 20
 
     FontMetrics {
         id: readerFontMetrics
@@ -218,6 +257,24 @@ Rectangle {
         onTriggered: startUploaderService()
     }
 
+    // 编码探测轮询（300ms，最多 20 次 = 6 秒）
+    Timer {
+        id: encodingProbeTimer
+        interval: 300
+        repeat: true
+        running: false
+        onTriggered: pollEncodingResult()
+    }
+
+    // 转码结果轮询（250ms，最多 40 次 = 10 秒）
+    Timer {
+        id: encodingConvertTimer
+        interval: 250
+        repeat: true
+        running: false
+        onTriggered: pollEncodingConvert()
+    }
+
     Timer {
         id: uploaderOutputTimer
         interval: 500
@@ -253,6 +310,7 @@ Rectangle {
         onTriggered: {
             if (currentUrl === "") return;
             readingTimeData[currentUrl] = (readingTimeData[currentUrl] || 0) + 1;
+            updateReadingSpeed();
         }
     }
 
@@ -636,6 +694,7 @@ Rectangle {
             textColor: textColor,
             themeName: themeName,
             autoScrollSeconds: autoScrollSeconds,
+            readerMargin: readerMargin,
             scrollMode: scrollMode,
             tripleTapHome: tripleTapHome,
             chapterNameMode: chapterNameMode
@@ -645,7 +704,9 @@ Rectangle {
 
     function loadSettings() {
         var settings = Storage.loadSettingsFromStore();
-        baseFontSize = parseInt(settings.fontSize) || 15;
+        var fs = parseInt(settings.fontSize);
+        if (isNaN(fs)) fs = FONT_DEFAULT;
+        baseFontSize = Math.max(FONT_MIN, Math.min(FONT_MAX, fs));
         lineSpacing = parseInt(settings.lineSpacing) || 4;
         bgColor = settings.bgColor || "#FFFBF0";
         textColor = settings.textColor || "#333333";
@@ -663,6 +724,9 @@ Rectangle {
         }
         tripleTapHome = settings.tripleTapHome === true;
         chapterNameMode = settings.chapterNameMode || "scroll";
+        // 页边距（新增项，旧状态文件无此字段时用默认值）
+        var m = parseInt(settings.readerMargin);
+        readerMargin = (isNaN(m) ? 7 : Math.max(MARGIN_MIN, Math.min(MARGIN_MAX, m)));
         charsPerLine = ReaderUtils.updateCharsPerLine(baseFontSize);
     }
 
@@ -833,6 +897,14 @@ Rectangle {
             statusMessage = "删除记录失败";
             messageTimer.restart();
         }
+    }
+
+    // HTML 转义（用于 StyledText 中安全嵌入用户文本）
+    function escapeHtml(str) {
+        if (typeof str !== "string") return "";
+        return str.replace(/&/g, "&amp;")
+                  .replace(/</g, "&lt;")
+                  .replace(/>/g, "&gt;");
     }
 
     function shellEscape(str) {
@@ -1024,6 +1096,26 @@ Rectangle {
             flushProgress();
         }
 
+        // 记录本次阅读会话的起点，用于实测阅读速度
+        sessionStartMs = new Date().getTime();
+        sessionCharsAtStart = 0;
+
+        // 清空上一本书的搜索结果（行号已无意义）
+        searchQuery = "";
+        searchResults = [];
+        searchTotal = 0;
+        searchTruncated = false;
+        pendingSearchRatio = -1;
+
+        // 取消上一本书残留的编码探测/转码任务，避免回调污染新书籍
+        encodingProbeTimer.stop();
+        encodingConvertTimer.stop();
+        encodingProbeUrl = "";
+        encodingConvertUrl = "";
+        encodingConverting = false;
+        encodingProbeRetry = 0;
+        encodingConvertRetry = 0;
+
         if (xhr && xhr.readyState === XMLHttpRequest.LOADING) {
             xhr.abort();
             xhr = null;
@@ -1043,11 +1135,141 @@ Rectangle {
 
         isLoading = true;
         statusMessage = "";
+        detectedEncoding = "";
+        encodingNotice = "";
 
-        var encodedUrl = encodePath(url);
-        doLoadFile(url, encodedUrl);
+        // 先检测编码：GBK/BIG5/UTF-16 的 txt 若直接按 UTF-8 读取会变乱码，
+        // 需要先转码为 UTF-8 的临时文件再加载。
+        detectEncodingThenLoad(url);
     }
 
+    // ====== 编码检测与转码 ======
+
+    // ====== 编码检测与转码 ======
+    //
+    // 流程：探测编码 → 若非 UTF-8 则转码到临时文件 → 加载（临时文件或原文件）
+    // shellPluginController 无输出回传，因此通过「命令写结果文件 + 轮询读取」获取结论。
+    // 轮询用异步 XHR，避免阻塞渲染线程。
+
+    function detectEncodingThenLoad(url) {
+        var ctrl = (typeof shellPluginController !== "undefined") ? shellPluginController : null;
+        if (!ctrl) {
+            // 无 shell 能力（如预览环境）时退回原逻辑，仅支持 UTF-8
+            doLoadFile(url, encodePath(url));
+            return;
+        }
+        encodingProbeUrl = url;
+        encodingProbeRetry = 0;
+        encodingProbeTimer.start();
+        try {
+            ctrl.sendCommand(Encoding.buildDetectToFileCommand(url));
+        } catch (e) {
+            // 探测命令失败不阻塞阅读，直接按 UTF-8 打开
+            encodingProbeTimer.stop();
+            doLoadFile(url, encodePath(url));
+        }
+    }
+
+    // 轮询探测结果文件
+    function pollEncodingResult() {
+        if (encodingProbeUrl === "")
+            return;
+        var ctrl = (typeof shellPluginController !== "undefined") ? shellPluginController : null;
+        if (!ctrl) {
+            encodingProbeTimer.stop();
+            doLoadFile(encodingProbeUrl, encodePath(encodingProbeUrl));
+            return;
+        }
+        // 用 cat 把结果文件内容送到 QML 可见的位置（读文件走 XHR）
+        var rp = Encoding.resultPathFor(encodingProbeUrl);
+        _readTextFile(rp, function (text) {
+            if (encodingProbeUrl === "") return;   // 期间已切换书籍
+            var enc = Encoding.parseResultFile(text);
+            if (enc === "" && encodingProbeRetry < 20) {
+                encodingProbeRetry++;   // 命令尚未执行完，继续等
+                return;
+            }
+            encodingProbeTimer.stop();
+            applyEncoding(encodingProbeUrl, enc);
+        });
+    }
+
+    // 依据探测结果决定「直接加载」还是「先转码再加载」
+    function applyEncoding(url, enc) {
+        detectedEncoding = enc;
+        if (!Encoding.needConvert(enc)) {
+            doLoadFile(url, encodePath(url));
+            return;
+        }
+        var ctrl = (typeof shellPluginController !== "undefined") ? shellPluginController : null;
+        if (!ctrl) {
+            doLoadFile(url, encodePath(url));
+            return;
+        }
+        encodingConverting = true;
+        statusMessage = "正在转换编码（" + Encoding.encodingLabel(enc) + "）…";
+        var converted = Encoding.tempPathFor(url);
+        try {
+            ctrl.sendCommand(Encoding.buildConvertCommand(url, enc));
+        } catch (e) {
+            encodingConverting = false;
+            doLoadFile(url, encodePath(url));
+            return;
+        }
+        encodingConvertUrl = url;
+        encodingConvertTarget = converted;
+        encodingConvertRetry = 0;
+        encodingConvertTimer.start();
+    }
+
+    // 轮询转码结果（转换完成后直接读临时文件）
+    function pollEncodingConvert() {
+        if (encodingConvertUrl === "")
+            return;
+        if (encodingConvertRetry++ > 40) {
+            // 超时：退回原文件，至少能打开（可能乱码）
+            encodingConvertTimer.stop();
+            encodingConverting = false;
+            statusMessage = "编码转换超时，已按原样打开";
+            doLoadFile(encodingConvertUrl, encodePath(encodingConvertUrl));
+            encodingConvertUrl = "";
+            return;
+        }
+        var target = encodingConvertTarget;
+        _readTextFile(target, function (text) {
+            if (encodingConvertUrl === "") return;
+            if (text === "") return;   // 尚未生成，继续等
+            encodingConvertTimer.stop();
+            encodingConverting = false;
+            encodingNotice = "已自动转换为 " + Encoding.encodingLabel(detectedEncoding);
+            var u = encodingConvertUrl;
+            encodingConvertUrl = "";
+            // 加载转码后的临时文件（此时必为 UTF-8）
+            doLoadFile(u, encodePath("file://" + target));
+        });
+    }
+
+    // 异步读取文本文件（不阻塞 UI）；失败或不存在时回调空串
+    function _readTextFile(path, callback) {
+        try {
+            var xhr2 = new XMLHttpRequest();
+            xhr2.open("GET", "file://" + path, true);
+            xhr2.onreadystatechange = function () {
+                if (xhr2.readyState !== XMLHttpRequest.DONE) return;
+                var t = "";
+                if (xhr2.status === 200 || xhr2.status === 0)
+                    t = xhr2.responseText || "";
+                callback(t);
+            };
+            xhr2.onerror = function () { callback(""); };
+            xhr2.send();
+        } catch (e) {
+            callback("");
+        }
+    }
+
+    // originalUrl 始终是「原书路径」——进度、书签都以它为键，
+    // 不能因转码临时文件而改变键值。
     function doLoadFile(originalUrl, requestUrl) {
         var reqId = ++currentRequestId;
         xhr = new XMLHttpRequest();
@@ -1062,7 +1284,9 @@ Rectangle {
                     content = content.substring(1);
                 // processContent 会将后续初始化移至 afterContentLoaded（同步小文件/异步大文件）
                 processContent(content);
-            } else if (requestUrl !== originalUrl) {
+            } else if (requestUrl !== originalUrl && encodingConvertTarget === "") {
+                // 路径编码回退：仅当不是「转码临时文件」时才重试原路径，
+                // 否则会拿乱码文件再试一次，无意义且可能死循环
                 doLoadFile(originalUrl, originalUrl);
                 return;
             } else {
@@ -1070,7 +1294,7 @@ Rectangle {
                 lines = [];
                 chapterList = [];
                 currentLine = 0;
-                statusMessage = "无法打开文件";
+                statusMessage = encodingConverting ? "编码转换失败" : "无法打开文件";
             }
             xhr = null;
         };
@@ -1140,12 +1364,180 @@ Rectangle {
             scrollFlickable.contentY = currentLine * getTextLineHeight();
         }
 
+        // 跨章搜索跳转：章节切换后按记录的比例定位
+        if (pendingSearchRatio >= 0) {
+            currentLine = Math.min(Math.floor(pendingSearchRatio * lines.length), maxStartLine());
+            clampCurrentLine();
+            if (scrollMode) {
+                scrollFlickable.contentY = currentLine * getTextLineHeight();
+            }
+            pendingSearchRatio = -1;
+        }
+
+        updateChapterCharStats();
+        // 首次进入本书时，把会话字符起点对齐到当前位置，
+        // 避免把「打开前的历史进度」误算进本次速度样本
+        if (sessionStartMs === 0) {
+            sessionStartMs = new Date().getTime();
+            sessionCharsAtStart = currentCharOffset();
+        }
         updateChapterList();
         updateScrollMax();
         loadBookmarkList();
         saveSettings();
         isLoading = false;
         statusMessage = "";
+    }
+
+    // 计算全书与各章的字符统计（在解析完成后调用一次）
+    function computeCharStats() {
+        chapterCharOffsets = [];
+        var acc = 0;
+        var total = 0;
+        for (var i = 0; i < chapterBoundaries.length; i++) {
+            var b = chapterBoundaries[i];
+            var chars = 0;
+            for (var j = b.startRaw; j < b.endRaw; j++) {
+                chars += (rawLines[j] ? rawLines[j].length : 0) + 1;  // +1 计换行
+            }
+            chapterCharOffsets.push({ start: acc, chars: chars });
+            acc += chars;
+        }
+        total = acc;
+        bookCharTotal = total;
+        updateChapterCharStats();
+    }
+
+    // 更新「当前章节」相关的字符统计量
+    function updateChapterCharStats() {
+        if (currentChapterIdx >= 0 && currentChapterIdx < chapterCharOffsets.length) {
+            var c = chapterCharOffsets[currentChapterIdx];
+            chapterCharsBefore = c.start;
+            chapterCharCount = c.chars;
+        } else {
+            chapterCharsBefore = 0;
+            chapterCharCount = 0;
+        }
+    }
+
+    // 当前阅读位置对应的全书字符偏移
+    function currentCharOffset() {
+        if (chapterCharCount <= 0) return 0;
+        var inChapter = 0;
+        if (lines.length > 0 && chapterCharOffsets.length > currentChapterIdx
+            && currentChapterIdx >= 0) {
+            var perLine = chapterCharCount / Math.max(1, lines.length);
+            inChapter = Math.round(currentLine * perLine);
+        }
+        return chapterCharsBefore + Math.min(inChapter, chapterCharCount);
+    }
+
+    // 全书进度百分比（基于字符偏移）
+    function getBookPercent() {
+        if (bookCharTotal <= 0) return getProgressPercent();
+        return Stats.bookPercent(currentCharOffset(), bookCharTotal);
+    }
+
+    // 本章进度百分比
+    function getChapterPercent() {
+        if (chapterCharCount <= 0) return getProgressPercent();
+        var inChapter = currentCharOffset() - chapterCharsBefore;
+        return Stats.chapterPercent(inChapter, chapterCharCount);
+    }
+
+    // 预计剩余阅读时长（秒）；速度未测得时用默认值估算
+    function getRemainingSeconds() {
+        if (bookCharTotal <= 0) return 0;
+        var remain = bookCharTotal - currentCharOffset();
+        return Stats.estimatedRemainingSeconds(remain, readingSpeed);
+    }
+
+    // 剩余时长的可读文案
+    function getRemainingText() {
+        var sec = getRemainingSeconds();
+        if (sec <= 0) return "已读完";
+        return "剩余约 " + Stats.formatRemaining(sec);
+    }
+
+    // 依据本次会话「读了多久 / 读了多少字」估算阅读速度。
+    // 样本不足或数值异常时保持 0（表示未测得），由估算函数退回默认速度。
+    function updateReadingSpeed() {
+        if (sessionStartMs <= 0 || currentUrl === "") return;
+        var elapsed = (new Date().getTime() - sessionStartMs) / 1000;
+        if (elapsed < 60) return;                     // 至少读满 1 分钟才有参考价值
+        var charsRead = currentCharOffset() - sessionCharsAtStart;
+        var spd = Stats.estimateSpeed(charsRead, elapsed);
+        if (spd > 0) readingSpeed = spd;
+    }
+
+    // ====== 全文搜索 ======
+
+    function openSearch() {
+        searchQuery = "";
+        searchResults = [];
+        searchTotal = 0;
+        searchTruncated = false;
+        activePanel = "search";
+    }
+
+    // 执行搜索（基于 rawLines，不受换行与字号影响）
+    function runSearch(query) {
+        searchQuery = query || "";
+        if (searchQuery === "") {
+            searchResults = [];
+            searchTotal = 0;
+            searchTruncated = false;
+            return;
+        }
+        if (!rawLines || rawLines.length === 0) {
+            searchResults = [];
+            searchTotal = 0;
+            return;
+        }
+        var r = Search.search(rawLines, searchQuery, {
+            caseSensitive: searchCaseSensitive,
+            wholeWord: searchWholeWord
+        });
+        searchResults = r.hits;
+        searchTotal = r.total;
+        searchTruncated = r.truncated;
+    }
+
+    // 按章节归组，供结果列表展示
+    function searchGroups() {
+        if (!searchResults || searchResults.length === 0) return [];
+        return Search.groupByChapter(searchResults, chapterBoundaries);
+    }
+
+    // 跳转到某条搜索结果
+    function jumpToSearchHit(hit) {
+        if (!hit) return;
+        var targetChapter = Search.chapterIndexForLine(hit.line, chapterBoundaries);
+        if (targetChapter < 0) targetChapter = 0;
+
+        // 计算该原始行在目标章节内的行号
+        var b = chapterBoundaries[targetChapter];
+        var rawLineInChapter = hit.line - b.startRaw;
+
+        if (targetChapter === currentChapterIdx) {
+            // 已在该章：直接按比例定位到对应换行后的行
+            var b2 = chapterBoundaries[currentChapterIdx];
+            var rawCount = Math.max(1, b2.endRaw - b2.startRaw);
+            var ratio = rawLineInChapter / rawCount;
+            currentLine = Math.min(Math.floor(ratio * lines.length), maxStartLine());
+            clampCurrentLine();
+            if (scrollMode) {
+                scrollFlickable.contentY = currentLine * getTextLineHeight();
+            }
+            closePanels();
+            return;
+        }
+
+        // 跨章：切章后再定位。loadChapter 会从保存的进度恢复，
+        // 因此这里用待定位变量在 loadChapter 完成后校正。
+        pendingSearchRatio = rawLineInChapter / Math.max(1, b.endRaw - b.startRaw);
+        loadChapter(targetChapter);
+        closePanels();
     }
 
     function updateChapterList() {
@@ -1187,6 +1579,7 @@ Rectangle {
         try {
             rawLines = ReaderUtils.splitIntoLines(content);
             chapterBoundaries = scanChapterBoundaries(rawLines);
+            computeCharStats();
 
             // 读取保存的进度 → 定位到对应章节
             var saved = loadProgress(currentUrl);
@@ -1338,6 +1731,55 @@ Rectangle {
         saveProgress();
         // 加载新章节
         loadChapter(newIdx);
+    }
+
+    // ====== 排版调节 ======
+
+    function stepFontSize(delta) {
+        var v = baseFontSize + delta;
+        if (v < FONT_MIN) v = FONT_MIN;
+        if (v > FONT_MAX) v = FONT_MAX;
+        if (v !== baseFontSize) setFontSize(v);
+    }
+
+    function stepLineSpacing(delta) {
+        var v = lineSpacing + delta;
+        if (v < LINE_SPACING_MIN) v = LINE_SPACING_MIN;
+        if (v > LINE_SPACING_MAX) v = LINE_SPACING_MAX;
+        if (v !== lineSpacing) {
+            lineSpacing = v;
+            rewrapCurrentChapter();
+            saveSettings();
+        }
+    }
+
+    function stepMargin(delta) {
+        var v = readerMargin + delta;
+        if (v < MARGIN_MIN) v = MARGIN_MIN;
+        if (v > MARGIN_MAX) v = MARGIN_MAX;
+        if (v !== readerMargin) {
+            readerMargin = v;
+            rewrapCurrentChapter();
+            saveSettings();
+        }
+    }
+
+    // 行距/边距变化后需要重新换行（每页容纳的行数变了），
+    // 但字符内容不变，因此按比例保持阅读位置。
+    function rewrapCurrentChapter() {
+        if (currentUrl === "" || currentChapterIdx < 0 || chapterBoundaries.length === 0)
+            return;
+        var ratio = lines.length > 0 ? (currentLine / lines.length) : 0;
+        var b = chapterBoundaries[currentChapterIdx];
+        var chapterRaw = rawLines.slice(b.startRaw, b.endRaw);
+        var result = ReaderUtils.wrapLines(chapterRaw, charsPerLine * 2 - 1);
+        lines = result.lines;
+        currentLine = Math.min(Math.floor(ratio * lines.length), maxStartLine());
+        clampCurrentLine();
+        updateScrollMax();
+        if (scrollMode) {
+            scrollFlickable.contentY = currentLine * getTextLineHeight();
+        }
     }
 
     function setFontSize(size) {
@@ -2576,12 +3018,23 @@ Rectangle {
                     width: parent.width
                     spacing: 4
 
-                    // 进度 + 阅读时长
+                    // 进度 + 阅读时长 + 剩余时间预估
                     Text {
                         width: parent.width
-                        text: "进度: " + getProgressPercent() + "% (" + getCurrentPage() + "/" + getTotalPages() + "页)    阅读: " + formatReadingTime(readingTimeData[currentUrl])
+                        text: "本章 " + getChapterPercent() + "%　全书 " + getBookPercent()
+                              + "%　(" + getCurrentPage() + "/" + getTotalPages() + "页)"
                         font.pixelSize: 9
                         color: "#888"
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: "已读 " + formatReadingTime(readingTimeData[currentUrl])
+                              + "　" + getRemainingText()
+                              + (readingSpeed > 0 ? ("　速度 " + readingSpeed + "字/分") : "")
+                        font.pixelSize: 9
+                        color: "#AAA"
                         font.family: "Microsoft YaHei"
                     }
 
@@ -2591,7 +3044,7 @@ Rectangle {
                         radius: 5
                         color: "#DDDDDD"
                         Rectangle {
-                            width: parent.width * (getProgressPercent() / 100)
+                            width: parent.width * (getBookPercent() / 100)
                             height: parent.height
                             radius: 5
                             color: "#2f7dcc"
@@ -2602,33 +3055,76 @@ Rectangle {
                         }
                     }
 
-                    // 字号 + 行距 一行搞定
+                    // 字号：无级调节（12–28），左右加减
                     Row {
                         width: parent.width
-                        spacing: 6
-                        Row {
-                            spacing: 3
-                            Repeater {
-                                model: [{t:"小",v:13},{t:"中",v:15},{t:"大",v:18}]
-                                delegate: Rectangle {
-                                    width: 32; height: 20; radius: 3
-                                    color: baseFontSize === modelData.v ? "#2f7dcc" : "#EEEEEE"
-                                    Text { anchors.centerIn: parent; text: modelData.t; font.pixelSize: 9; color: baseFontSize === modelData.v ? "#fff" : "#333"; font.family: "Microsoft YaHei" }
-                                    MouseArea { anchors.fill: parent; onClicked: setFontSize(modelData.v) }
-                                }
-                            }
+                        height: 22
+                        spacing: 3
+                        Text {
+                            width: 46; height: 22
+                            text: "字号 " + baseFontSize
+                            font.pixelSize: 10; color: "#666"
+                            verticalAlignment: Text.AlignVCenter
+                            font.family: "Microsoft YaHei"
                         }
-                        Row {
-                            spacing: 3
-                            Repeater {
-                                model: [{t:"紧凑",v:2},{t:"标准",v:4},{t:"宽松",v:6}]
-                                delegate: Rectangle {
-                                    width: 40; height: 20; radius: 3
-                                    color: lineSpacing === modelData.v ? "#2f7dcc" : "#EEEEEE"
-                                    Text { anchors.centerIn: parent; text: modelData.t; font.pixelSize: 9; color: lineSpacing === modelData.v ? "#fff" : "#333"; font.family: "Microsoft YaHei" }
-                                    MouseArea { anchors.fill: parent; onClicked: { lineSpacing = modelData.v; clampCurrentLine(); saveSettings(); } }
-                                }
-                            }
+                        Rectangle {
+                            width: 30; height: 22; radius: 3
+                            color: baseFontSize <= FONT_MIN ? "#F0F0F0" : "#EEEEEE"
+                            Text { anchors.centerIn: parent; text: "－"; font.pixelSize: 13; color: baseFontSize <= FONT_MIN ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
+                            MouseArea { anchors.fill: parent; onClicked: stepFontSize(-1) }
+                        }
+                        Rectangle {
+                            width: 30; height: 22; radius: 3; color: "#EEEEEE"
+                            Text { anchors.centerIn: parent; text: "＋"; font.pixelSize: 13; color: baseFontSize >= FONT_MAX ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
+                            MouseArea { anchors.fill: parent; onClicked: stepFontSize(1) }
+                        }
+                        Rectangle {
+                            width: 46; height: 22; radius: 3; color: "#F5F5F5"
+                            Text { anchors.centerIn: parent; text: "重置"; font.pixelSize: 9; color: "#666"; font.family: "Microsoft YaHei" }
+                            MouseArea { anchors.fill: parent; onClicked: setFontSize(FONT_DEFAULT) }
+                        }
+                    }
+
+                    // 行距 / 页边距：独立调节
+                    Row {
+                        width: parent.width
+                        height: 22
+                        spacing: 3
+                        Text {
+                            width: 46; height: 22
+                            text: "行距 " + lineSpacing
+                            font.pixelSize: 10; color: "#666"
+                            verticalAlignment: Text.AlignVCenter
+                            font.family: "Microsoft YaHei"
+                        }
+                        Rectangle {
+                            width: 30; height: 22; radius: 3
+                            color: lineSpacing <= LINE_SPACING_MIN ? "#F0F0F0" : "#EEEEEE"
+                            Text { anchors.centerIn: parent; text: "－"; font.pixelSize: 13; color: lineSpacing <= LINE_SPACING_MIN ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
+                            MouseArea { anchors.fill: parent; onClicked: stepLineSpacing(-1) }
+                        }
+                        Rectangle {
+                            width: 30; height: 22; radius: 3; color: "#EEEEEE"
+                            Text { anchors.centerIn: parent; text: "＋"; font.pixelSize: 13; color: lineSpacing >= LINE_SPACING_MAX ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
+                            MouseArea { anchors.fill: parent; onClicked: stepLineSpacing(1) }
+                        }
+                        Text {
+                            width: 46; height: 22
+                            text: "边距 " + readerMargin
+                            font.pixelSize: 10; color: "#666"
+                            verticalAlignment: Text.AlignVCenter
+                            font.family: "Microsoft YaHei"
+                        }
+                        Rectangle {
+                            width: 30; height: 22; radius: 3
+                            color: readerMargin <= MARGIN_MIN ? "#F0F0F0" : "#EEEEEE"
+                            Text { anchors.centerIn: parent; text: "－"; font.pixelSize: 13; color: readerMargin <= MARGIN_MIN ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
+                            MouseArea { anchors.fill: parent; onClicked: stepMargin(-1) }
+                        }
+                        Rectangle {
+                            width: 30; height: 22; radius: 3; color: "#EEEEEE"
+                            Text { anchors.centerIn: parent; text: "＋"; font.pixelSize: 13; color: readerMargin >= MARGIN_MAX ? "#BBB" : "#333"; font.family: "Microsoft YaHei" }
+                            MouseArea { anchors.fill: parent; onClicked: stepMargin(1) }
                         }
                     }
 
@@ -2656,6 +3152,7 @@ Rectangle {
                         columnSpacing: 3
 
                         MenuButton { label: "返回书架"; w: (menuContent.width - 6) / 3; onClicked: returnToShelf() }
+                        MenuButton { label: "搜索"; w: (menuContent.width - 6) / 3; onClicked: { closePanels(); openSearch(); } }
                         MenuButton { label: "章节"; w: (menuContent.width - 6) / 3; onClicked: { closePanels(); buildChapterList(); navigateTo("chapterList"); } }
                         MenuButton { label: "跳转"; w: (menuContent.width - 6) / 3; onClicked: openPanel("jump") }
                         MenuButton { label: "添加书签"; w: (menuContent.width - 6) / 3; onClicked: addBookmark() }
@@ -2667,6 +3164,231 @@ Rectangle {
                     }
 
                     Item { width: parent.width; height: 6 }
+                }
+            }
+        }
+    }
+
+    // ====== 全文搜索面板 ======
+    Rectangle {
+        id: searchPanel
+        visible: activePanel === "search"
+        anchors.fill: parent
+        color: bgColor
+        z: 40
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 6
+            spacing: 5
+
+            // 顶栏：返回 + 标题
+            Row {
+                width: parent.width
+                height: 24
+                spacing: 6
+
+                Rectangle {
+                    width: 50
+                    height: 24
+                    radius: 4
+                    color: "#DDDDDD"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "返回"
+                        font.pixelSize: 11
+                        color: "#333333"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: closePanels()
+                    }
+                }
+
+                Text {
+                    width: parent.width - 102
+                    height: 24
+                    text: "全文搜索"
+                    font.pixelSize: 13
+                    font.bold: true
+                    color: textColor
+                    verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignHCenter
+                    font.family: "Microsoft YaHei"
+                }
+
+                Rectangle {
+                    width: 40
+                    height: 24
+                    radius: 4
+                    color: "#EEEEEE"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "清空"
+                        font.pixelSize: 10
+                        color: "#333333"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: { searchQuery = ""; runSearch(""); }
+                    }
+                }
+            }
+
+            // 输入框（点击唤起键盘）
+            Rectangle {
+                width: parent.width
+                height: 28
+                radius: 4
+                color: "#FFFFFF"
+                border.color: "#CCCCCC"
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: parent.width - 16
+                    text: searchQuery === "" ? "点击输入要搜索的内容…" : searchQuery
+                    font.pixelSize: 12
+                    color: searchQuery === "" ? "#AAAAAA" : "#333333"
+                    elide: Text.ElideRight
+                    font.family: "Microsoft YaHei"
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        showKeyboard(searchQuery, function (text) {
+                            runSearch(text);
+                        });
+                    }
+                }
+            }
+
+            // 选项：整词 / 区分大小写
+            Row {
+                width: parent.width
+                height: 22
+                spacing: 6
+
+                Rectangle {
+                    width: (parent.width - 6) / 2
+                    height: 22
+                    radius: 3
+                    color: searchWholeWord ? "#2f7dcc" : "#EEEEEE"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "整词匹配"
+                        font.pixelSize: 10
+                        color: searchWholeWord ? "#FFFFFF" : "#666666"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            searchWholeWord = !searchWholeWord;
+                            runSearch(searchQuery);
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: (parent.width - 6) / 2
+                    height: 22
+                    radius: 3
+                    color: searchCaseSensitive ? "#2f7dcc" : "#EEEEEE"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "区分大小写"
+                        font.pixelSize: 10
+                        color: searchCaseSensitive ? "#FFFFFF" : "#666666"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: {
+                            searchCaseSensitive = !searchCaseSensitive;
+                            runSearch(searchQuery);
+                        }
+                    }
+                }
+            }
+
+            // 结果统计
+            Text {
+                width: parent.width
+                height: 16
+                visible: searchQuery !== ""
+                text: {
+                    if (searchTotal === 0) return "未找到匹配内容";
+                    var base = "共 " + searchTotal + " 处匹配";
+                    if (searchTruncated) base += "（仅显示前 " + searchResults.length + " 处）";
+                    return base;
+                }
+                font.pixelSize: 10
+                color: searchTotal === 0 && searchQuery !== "" ? "#D32F2F" : "#888888"
+                font.family: "Microsoft YaHei"
+            }
+
+            // 结果列表
+            ListView {
+                width: parent.width
+                height: parent.height - 190
+                clip: true
+                model: searchResults
+                spacing: 3
+                boundsBehavior: Flickable.StopAtBounds
+
+                delegate: Rectangle {
+                    width: ListView.view.width
+                    height: hitText.height + 12
+                    radius: 4
+                    color: "#F5F5F5"
+                    border.color: "#E0E0E0"
+
+                    Column {
+                        id: hitText
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: 6
+                        spacing: 2
+
+                        Text {
+                            width: parent.width
+                            text: "第 " + (Search.chapterIndexForLine(modelData.line, chapterBoundaries) + 1)
+                                  + " 章 · 第 " + (modelData.line + 1) + " 行"
+                            font.pixelSize: 9
+                            color: "#999999"
+                            font.family: "Microsoft YaHei"
+                        }
+
+                        // 命中片段：关键词用高亮色
+                        Text {
+                            width: parent.width
+                            textFormat: Text.StyledText
+                            font.pixelSize: 11
+                            color: textColor
+                            wrapMode: Text.Wrap
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
+                            font.family: "Microsoft YaHei"
+                            text: Search.highlightSegments(modelData.before + modelData.match + modelData.after,
+                                                           searchQuery, searchCaseSensitive)
+                                  .map(function (s) {
+                                      return s.isMatch
+                                          ? ("<font color='#D32F2F'><b>" + escapeHtml(s.text) + "</b></font>")
+                                          : escapeHtml(s.text);
+                                  }).join("")
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: jumpToSearchHit(modelData)
+                    }
                 }
             }
         }
@@ -3292,6 +4014,35 @@ Rectangle {
         color: "#D32F2F"
         z: 100
         font.family: "Microsoft YaHei"
+    }
+
+    // 编码自动转换完成后的提示（信息性，用中性色，自动消失）
+    Rectangle {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: 8
+        width: Math.min(parent.width - 24, encodingNoticeText.implicitWidth + 20)
+        height: 26
+        radius: 13
+        color: "#263238"
+        opacity: 0.92
+        visible: encodingNotice !== ""
+        z: 101
+
+        Text {
+            id: encodingNoticeText
+            anchors.centerIn: parent
+            text: encodingNotice
+            font.pixelSize: 11
+            color: "#ECEFF1"
+            font.family: "Microsoft YaHei"
+        }
+
+        Timer {
+            running: encodingNotice !== ""
+            interval: 2600
+            onTriggered: encodingNotice = ""
+        }
     }
 
     SponsorDialog {
