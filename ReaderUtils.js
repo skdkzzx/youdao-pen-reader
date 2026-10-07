@@ -179,8 +179,12 @@ function normalizeAutoScrollSeconds(value) {
     return Math.max(1, Math.min(999, seconds));
 }
 
-function getLinesPerPage(height, readerMargin, textLineHeight) {
-    var readableHeight = Math.max(40, height - readerMargin * 2);
+// statusBarHeight：阅读器底部状态栏的高度。
+// 修复：原实现只减去上下边距，未扣除状态栏，导致最后一行的底部
+// 与状态栏重叠、文字被压住（在 320x170 上用模拟器实测确认）。
+function getLinesPerPage(height, readerMargin, textLineHeight, statusBarHeight) {
+    var sb = statusBarHeight || 0;
+    var readableHeight = Math.max(40, height - readerMargin * 2 - sb);
     return Math.max(1, Math.floor(readableHeight / textLineHeight));
 }
 
@@ -340,6 +344,7 @@ function buildBookList(folderScanAvailable, bookFolderModel, progressStore, defa
                 name: bookTitle(url),
                 line: line,
                 totalLines: totalLines,
+                size: folderModelFileSize(bookFolderModel, i),
                 timestamp: parseInt(progressItem.timestamp) || 0,
                 progress: isNaN(bp) ? progressFromLine(line, totalLines) : bp
             });
@@ -378,6 +383,18 @@ function buildBookList(folderScanAvailable, bookFolderModel, progressStore, defa
     return items;
 }
 
+
+// 读取 FolderListModel 中某条目的文件大小（字节）。取不到时返回 0。
+function folderModelFileSize(bookFolderModel, index) {
+    if (!bookFolderModel) return 0;
+    try {
+        var sz = bookFolderModel.get(index, "fileSize");
+        var n = parseInt(sz);
+        return isNaN(n) ? 0 : n;
+    } catch (e) {
+        return 0;
+    }
+}
 
 function folderModelFileUrl(bookFolderModel, index, defaultBookFolder) {
     if (!bookFolderModel) return "";

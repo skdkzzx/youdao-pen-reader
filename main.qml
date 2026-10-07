@@ -5,6 +5,7 @@ import "ReaderUtils.js" as ReaderUtils
 import "Encoding.js" as Encoding
 import "ReadingStats.js" as Stats
 import "Search.js" as Search
+import "BookList.js" as BookList
 
 Rectangle {
     id: root
@@ -145,6 +146,8 @@ Rectangle {
             return settingsPage;
         if (mode === "chapterList")
             return chapterListPage;
+        if (mode === "stats")
+            return statsPage;
         return null;
     }
 
@@ -152,6 +155,12 @@ Rectangle {
     property bool keyboardPending: false
     property var bookList: []
     property int bookListTotal: 0   // 书架截断前的实际总数
+    // ====== 书架视图（排序 / 筛选）======
+    property string shelfQuery: ""
+    property string shelfSort: BookList.SORT_RECENT
+    property string shelfFilter: BookList.FILTER_ALL
+    property var shelfSource: []     // 未过滤的完整列表
+    property int statsRefreshKey: 0  // 改变时触发统计页重算
     property var bookmarkList: []
     property var progressStore: ({})
     property var bookmarksStore: ({})
@@ -695,6 +704,8 @@ Rectangle {
             themeName: themeName,
             autoScrollSeconds: autoScrollSeconds,
             readerMargin: readerMargin,
+            shelfSort: shelfSort,
+            shelfFilter: shelfFilter,
             scrollMode: scrollMode,
             tripleTapHome: tripleTapHome,
             chapterNameMode: chapterNameMode
@@ -724,6 +735,11 @@ Rectangle {
         }
         tripleTapHome = settings.tripleTapHome === true;
         chapterNameMode = settings.chapterNameMode || "scroll";
+        // 书架视图偏好（旧状态文件无此字段时用默认值）
+        shelfSort = BookList.isValidSortMode(settings.shelfSort)
+                    ? settings.shelfSort : BookList.SORT_RECENT;
+        shelfFilter = BookList.isValidFilterMode(settings.shelfFilter)
+                      ? settings.shelfFilter : BookList.FILTER_ALL;
         // 页边距（新增项，旧状态文件无此字段时用默认值）
         var m = parseInt(settings.readerMargin);
         readerMargin = (isNaN(m) ? 7 : Math.max(MARGIN_MIN, Math.min(MARGIN_MAX, m)));
@@ -731,8 +747,96 @@ Rectangle {
     }
 
     function loadBookList() {
-        bookList = ReaderUtils.buildBookList(folderScanAvailable, bookFolderModel, progressStore, defaultBookFolder);
+        shelfSource = ReaderUtils.buildBookList(folderScanAvailable, bookFolderModel, progressStore, defaultBookFolder);
         bookListTotal = ReaderUtils.getBookListTotal();
+        applyShelfView();
+    }
+
+    // ====== 阅读统计 ======
+
+    // 汇总所有书籍的阅读记录
+    function readingSummary() {
+        var records = [];
+        for (var url in progressStore) {
+            var r = progressStore[url];
+            if (!r) continue;
+            records.push({
+                readingTime: parseInt(r.readingTime) || 0,
+                bookPercent: parseInt(r.bookPercent) || 0,
+                timestamp: parseInt(r.timestamp) || 0
+            });
+        }
+        return Stats.summarize(records);
+    }
+
+    // 统计页展示用的条目（已格式化）
+    function statsRows() {
+        var s = readingSummary();
+        var counts = shelfFilterCounts();
+        return [
+            { k: "累计阅读", v: Stats.formatDuration(s.totalSeconds) },
+            { k: "阅读天数", v: s.activeDays + " 天" },
+            { k: "日均阅读", v: s.activeDays > 0 ? Stats.formatDuration(s.avgSecondsPerDay) : "—" },
+            { k: "在读书籍", v: s.bookCount + " 本" },
+            { k: "已读完", v: s.finishedCount + " 本" },
+            { k: "书架藏书", v: counts.all + " 本" },
+            { k: "未读", v: counts.unread + " 本" },
+            { k: "在读", v: counts.reading + " 本" }
+        ];
+    }
+
+    // 本机实测阅读速度（用于校准剩余时间预估）
+    function statsSpeedText() {
+        if (readingSpeed > 0) return readingSpeed + " 字/分（本机实测）";
+        return Stats.DEFAULT_CHARS_PER_MINUTE + " 字/分（默认值，读满 1 分钟后自动校准）";
+    }
+
+    function openStats() {
+        statsRefreshKey++;
+        navigateTo("stats");
+    }
+
+    // 应用排序与筛选，生成最终展示列表
+    function applyShelfView() {
+        bookList = BookList.applyView(shelfSource, shelfQuery, shelfFilter, shelfSort);
+    }
+
+    function setShelfSort(mode) {
+        shelfSort = mode;
+        applyShelfView();
+    }
+
+    function setShelfFilter(mode) {
+        shelfFilter = mode;
+        applyShelfView();
+    }
+
+    // 循环切换排序方式（320x170 上比横排五个按钮省空间）
+    function cycleShelfSort() {
+        var order = [BookList.SORT_RECENT, BookList.SORT_NAME, BookList.SORT_PROGRESS,
+                     BookList.SORT_SIZE, BookList.SORT_UNREAD];
+        var i = order.indexOf(shelfSort);
+        setShelfSort(order[(i + 1) % order.length]);
+        showToast("排序：" + BookList.sortLabel(shelfSort));
+    }
+
+    function setShelfQuery(q) {
+        shelfQuery = q || "";
+        applyShelfView();
+    }
+
+    // 各筛选条件下的书籍数量（供标签显示）
+    function shelfFilterCounts() {
+        return BookList.statusCounts(shelfSource);
+    }
+
+    function shelfFilterLabel(mode) {
+        var c = shelfFilterCounts();
+        if (mode === BookList.FILTER_ALL) return "全部 " + c.all;
+        if (mode === BookList.FILTER_UNREAD) return "未读 " + c.unread;
+        if (mode === BookList.FILTER_READING) return "在读 " + c.reading;
+        if (mode === BookList.FILTER_DONE) return "读完 " + c.done;
+        return mode;
     }
 
     // 书架长按菜单：重命名
@@ -841,6 +945,11 @@ Rectangle {
     }
 
     function addBookmark() {
+        addBookmarkWithNote("");
+    }
+
+    // 新增书签，可附带备注。note 为空时行为与原来一致。
+    function addBookmarkWithNote(note) {
         if (currentUrl === "")
             return;
         var preview = lines.length > currentLine ? String(lines[currentLine]).trim() : "";
@@ -855,8 +964,10 @@ Rectangle {
             line: currentLine,
             linesTotal: lines.length,   // 创建时的总行数（用于字号缩放后比例调整）
             chapterIdx: currentChapterIdx,
-            percent: getProgressPercent(),
-            preview: preview
+            percent: getBookPercent(),
+            preview: preview,
+            note: String(note || ""),   // 用户备注
+            created: new Date().getTime()
         });
         bookmarksStore[currentUrl] = items;
         if (writeState("bookmarks", JSON.stringify(bookmarksStore))) {
@@ -866,6 +977,75 @@ Rectangle {
             statusMessage = "添加书签失败";
             messageTimer.restart();
         }
+    }
+
+    // 编辑某条书签的备注
+    function editBookmarkNote(id) {
+        if (currentUrl === "")
+            return;
+        var items = bookmarksStore[currentUrl] || [];
+        var target = null;
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].id === id) { target = items[i]; break; }
+        }
+        if (!target) return;
+        showKeyboard(target.note || "", function (text) {
+            target.note = String(text || "");
+            if (writeState("bookmarks", JSON.stringify(bookmarksStore))) {
+                loadBookmarkList();
+                showToast("备注已保存");
+            } else {
+                statusMessage = "备注保存失败";
+                messageTimer.restart();
+            }
+        });
+    }
+
+    // 导出当前书籍的书签为文本文件
+    function exportBookmarks() {
+        if (currentUrl === "" || bookmarkList.length === 0) {
+            showToast("没有可导出的书签");
+            return;
+        }
+        var ctrl = (typeof shellPluginController !== "undefined") ? shellPluginController : null;
+        if (!ctrl) {
+            showToast("当前环境不支持导出");
+            return;
+        }
+        var text = buildBookmarkExport();
+        // 用 base64 传输，避免内容中的引号/换行破坏 shell 命令
+        var b64 = Qt.btoa(unescape(encodeURIComponent(text)));
+        var safe = b64.replace(/'/g, "'\\''");
+        var out = "/userdisk/" + sanitizeFileName(fileName) + "-书签.txt";
+        ctrl.sendCommand("mkdir -p /userdisk 2>/dev/null; "
+            + "printf '%s' '" + safe + "' | base64 -d > " + shellEscape(out) + " 2>/dev/null; "
+            + "[ -s " + shellEscape(out) + " ] && echo OK || echo FAIL");
+        showToast("已导出到 " + out);
+    }
+
+    // 生成书签导出文本
+    function buildBookmarkExport() {
+        var t = "《" + fileName + "》书签\n";
+        t += "导出时间：" + new Date().toLocaleString() + "\n";
+        t += "共 " + bookmarkList.length + " 条\n";
+        t += "----------------------------------------\n";
+        for (var i = 0; i < bookmarkList.length; i++) {
+            var b = bookmarkList[i];
+            var ch = parseInt(b.chapterIdx);
+            t += (i + 1) + ". ";
+            if (!isNaN(ch) && ch >= 0 && ch < chapterBoundaries.length)
+                t += "【" + chapterBoundaries[ch].title + "】";
+            t += " 进度 " + (parseInt(b.percent) || 0) + "%\n";
+            if (b.preview) t += "   原文：" + b.preview + "\n";
+            if (b.note) t += "   备注：" + b.note + "\n";
+            t += "\n";
+        }
+        return t;
+    }
+
+    // 文件名安全化（去掉路径分隔符等）
+    function sanitizeFileName(name) {
+        return String(name || "book").replace(/[\/:*?"<>|]/g, "_");
     }
 
     function deleteBookmark(id) {
@@ -951,9 +1131,12 @@ Rectangle {
         return ReaderUtils.normalizeAutoScrollSeconds(value);
     }
 
+    // 阅读器底部状态栏高度（必须从文本可容纳行数中扣除，否则最后一行被压住）
+    readonly property int readerStatusBarHeight: 14
+
     function getLinesPerPage() {
         var th = getTextLineHeight();
-        return ReaderUtils.getLinesPerPage(root.height, readerMargin, th);
+        return ReaderUtils.getLinesPerPage(root.height, readerMargin, th, readerStatusBarHeight);
     }
 
     function getTextLineHeight() {
@@ -2039,67 +2222,72 @@ Rectangle {
             anchors.margins: 6
             spacing: 4
 
+            // 状态筛选标签
             Row {
                 width: parent.width
-                height: 24
-                spacing: 6
+                height: 22
+                spacing: 4
 
+                Repeater {
+                    model: BookList.FILTER_MODES
+                    delegate: Rectangle {
+                        width: (parent.width - 38) / 4
+                        height: 22
+                        radius: 3
+                        color: shelfFilter === modelData.value ? "#2f7dcc" : "#EEEEEE"
+                        Text {
+                            anchors.centerIn: parent
+                            text: shelfFilterLabel(modelData.value)
+                            font.pixelSize: 9
+                            color: shelfFilter === modelData.value ? "#FFFFFF" : "#666666"
+                            elide: Text.ElideRight
+                            width: parent.width - 2
+                            horizontalAlignment: Text.AlignHCenter
+                            font.family: "Microsoft YaHei"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: setShelfFilter(modelData.value)
+                        }
+                    }
+                }
+
+                // 排序切换（点击循环切换，避免单独占一行 —— 320x170 上空间紧张）
                 Rectangle {
-                    width: 50
-                    height: 24
-                    radius: 4
-                    color: "#DDDDDD"
+                    width: 34
+                    height: 22
+                    radius: 3
+                    color: "#8D6E63"
                     Text {
                         anchors.centerIn: parent
-                        text: "返回"
-                        font.pixelSize: 11
-                        color: "#333333"
+                        text: "⇅"
+                        font.pixelSize: 12
+                        color: "#FFFFFF"
                         font.family: "Microsoft YaHei"
                     }
                     MouseArea {
                         anchors.fill: parent
-                        onClicked: closeShelf()
-                    }
-                }
-
-                Text {
-                    width: parent.width - 102
-                    height: 24
-                    text: bookListTotal > bookList.length
-                          ? ("书架 (" + bookList.length + "/共 " + bookListTotal + " 本)")
-                          : ("书架 (" + bookList.length + ")")
-                    font.pixelSize: 13
-                    font.bold: true
-                    color: textColor
-                    verticalAlignment: Text.AlignVCenter
-                    horizontalAlignment: Text.AlignHCenter
-                    elide: Text.ElideRight
-                    font.family: "Microsoft YaHei"
-                }
-
-                Rectangle {
-                    width: 40
-                    height: 24
-                    radius: 4
-                    color: "#E3F2FD"
-                    border.color: "#BBDEFB"
-                    Text {
-                        anchors.centerIn: parent
-                        text: "教程"
-                        font.pixelSize: 10
-                        color: "#1565C0"
-                        font.family: "Microsoft YaHei"
-                    }
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: openTutorial()
+                        onClicked: cycleShelfSort()
                     }
                 }
             }
 
+            // 当前排序与搜索状态提示
+            Text {
+                width: parent.width
+                height: 12
+                text: "排序：" + BookList.sortLabel(shelfSort)
+                      + (shelfQuery !== "" ? ("　筛选：“" + shelfQuery + "”") : "")
+                font.pixelSize: 9
+                color: "#999999"
+                elide: Text.ElideRight
+                font.family: "Microsoft YaHei"
+            }
+
             ListView {
                 width: parent.width
-                height: parent.height - 28
+                // 顶栏24 + 筛选22 + 排序提示12 + 间距 ~12 + 底部 28
+                height: parent.height - 104
                 clip: true
                 spacing: 3
                 model: bookList
@@ -2145,7 +2333,7 @@ Rectangle {
                             font.family: "Microsoft YaHei"
                         }
                         Text {
-                            text: modelData.progress + "%"
+                            text: (modelData.progress || 0) + "%"
                             font.pixelSize: 9
                             color: "#888"
                             anchors.verticalCenter: parent.verticalCenter
@@ -2157,7 +2345,9 @@ Rectangle {
                 Text {
                     anchors.centerIn: parent
                     visible: bookList.length === 0
-                    text: "暂无小说\n请将 txt 放到 " + defaultBookFolder
+                    text: shelfSource.length > 0
+                          ? "没有符合条件的书籍"
+                          : ("暂无小说\n请将 txt 放到 " + defaultBookFolder)
                     font.pixelSize: 11
                     color: textColor
                     opacity: 0.5
@@ -2175,6 +2365,45 @@ Rectangle {
         clip: true
 
         // 当前页文本（分页模式）
+        // 阅读器底部状态栏（定高 14px，与 readerStatusBarHeight 一致）。
+        // 文本区域的行数计算已扣除该高度，避免最后一行被压住。
+        Rectangle {
+            id: readerStatusBar
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: root.readerStatusBarHeight
+            color: "transparent"
+
+            Rectangle {
+                anchors.top: parent.top
+                anchors.left: parent.left
+                anchors.right: parent.right
+                height: 1
+                color: "#00000010"
+            }
+
+            Text {
+                anchors.left: parent.left
+                anchors.leftMargin: root.readerMargin
+                anchors.verticalCenter: parent.verticalCenter
+                text: "全书 " + getBookPercent() + "%　" + getRemainingText()
+                font.pixelSize: 8
+                color: "#999999"
+                font.family: "Microsoft YaHei"
+            }
+
+            Text {
+                anchors.right: parent.right
+                anchors.rightMargin: root.readerMargin
+                anchors.verticalCenter: parent.verticalCenter
+                text: getCurrentPage() + "/" + getTotalPages() + " 页"
+                font.pixelSize: 8
+                color: "#999999"
+                font.family: "Microsoft YaHei"
+            }
+        }
+
         Text {
             id: contentText
             anchors.left: parent.left
@@ -2184,7 +2413,9 @@ Rectangle {
             anchors.leftMargin: readerMargin
             anchors.rightMargin: readerMargin
             anchors.topMargin: readerMargin
-            anchors.bottomMargin: readerMargin + (!scrollMode && showNextChapter ? 26 : 0)
+            // 底部扣除：边距 + 状态栏高度（+ 章末「下一章」按钮预留）
+            anchors.bottomMargin: readerMargin + root.readerStatusBarHeight
+                                 + (!scrollMode && showNextChapter ? 26 : 0)
             text: getPageText()
             font.family: "Microsoft YaHei"
             font.pixelSize: baseFontSize
@@ -2206,7 +2437,8 @@ Rectangle {
             anchors.leftMargin: readerMargin
             anchors.rightMargin: readerMargin
             anchors.topMargin: readerMargin
-            anchors.bottomMargin: readerMargin
+            // 同样扣除状态栏高度，避免内容被压住
+            anchors.bottomMargin: readerMargin + root.readerStatusBarHeight
             visible: scrollMode
             clip: true
             contentWidth: width
@@ -2570,6 +2802,177 @@ Rectangle {
         }
     }
 
+    // ====== 阅读统计页面 ======
+    Item {
+        id: statsPage
+        anchors.fill: parent
+        visible: pageMode === "stats"
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 6
+            spacing: 5
+
+            Row {
+                width: parent.width
+                height: 24
+                spacing: 6
+
+                Rectangle {
+                    width: 50
+                    height: 24
+                    radius: 4
+                    color: "#DDDDDD"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "返回"
+                        font.pixelSize: 11
+                        color: "#333333"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: navigateBack()
+                    }
+                }
+
+                Text {
+                    width: parent.width - 102
+                    height: 24
+                    text: "阅读统计"
+                    font.pixelSize: 13
+                    font.bold: true
+                    color: textColor
+                    verticalAlignment: Text.AlignVCenter
+                    horizontalAlignment: Text.AlignHCenter
+                    font.family: "Microsoft YaHei"
+                }
+
+                Rectangle {
+                    width: 40
+                    height: 24
+                    radius: 4
+                    color: "#F0F0F0"
+                    Text {
+                        anchors.centerIn: parent
+                        text: "刷新"
+                        font.pixelSize: 10
+                        color: "#666"
+                        font.family: "Microsoft YaHei"
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        onClicked: { statsRefreshKey++; }
+                    }
+                }
+            }
+
+            Flickable {
+                width: parent.width
+                height: parent.height - 30
+                contentWidth: width
+                contentHeight: statsCol.height
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
+                Column {
+                    id: statsCol
+                    width: parent.width
+                    spacing: 4
+
+                    Text {
+                        width: parent.width
+                        text: "阅读概况"
+                        font.pixelSize: 11
+                        font.bold: true
+                        color: textColor
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Repeater {
+                        // 依赖 statsRefreshKey，点「刷新」或重新进入时重算
+                        model: statsRefreshKey >= 0 ? statsRows() : []
+                        delegate: Rectangle {
+                            width: statsCol.width
+                            height: 26
+                            radius: 3
+                            color: "#F8F4EC"
+                            border.color: "#E0D8C8"
+
+                            Row {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+
+                                Text {
+                                    width: parent.width * 0.55
+                                    text: modelData.k
+                                    font.pixelSize: 11
+                                    color: "#666"
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    font.family: "Microsoft YaHei"
+                                }
+                                Text {
+                                    width: parent.width * 0.45
+                                    text: modelData.v
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                    color: "#2f7dcc"
+                                    horizontalAlignment: Text.AlignRight
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    font.family: "Microsoft YaHei"
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
+
+                    Text {
+                        width: parent.width
+                        text: "阅读速度"
+                        font.pixelSize: 11
+                        font.bold: true
+                        color: textColor
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: statsSpeedText()
+                        font.pixelSize: 10
+                        color: "#888"
+                        wrapMode: Text.WordWrap
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Rectangle { width: parent.width; height: 1; color: "#EEEEEE" }
+
+                    Text {
+                        width: parent.width
+                        text: "说明"
+                        font.pixelSize: 11
+                        font.bold: true
+                        color: textColor
+                        font.family: "Microsoft YaHei"
+                    }
+
+                    Text {
+                        width: parent.width
+                        text: "· 阅读时长在阅读时自动累计，每 5 秒保存一次\n"
+                              + "· 阅读天数为有阅读记录的自然日天数\n"
+                              + "· 速度用于估算剩余阅读时间，样本不足时用默认值"
+                        font.pixelSize: 9
+                        color: "#999"
+                        lineHeight: 1.4
+                        wrapMode: Text.WordWrap
+                        font.family: "Microsoft YaHei"
+                    }
+                }
+            }
+        }
+    }
+
     Item {
         id: settingsPage
         anchors.fill: parent
@@ -2656,6 +3059,27 @@ Rectangle {
                         color: "#888"
                         wrapMode: Text.WordWrap
                         font.family: "Microsoft YaHei"
+                    }
+
+                    // 阅读统计入口
+                    Rectangle {
+                        width: parent.width
+                        height: 28
+                        radius: 3
+                        color: "#E3F2FD"
+                        border.color: "#BBDEFB"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "阅读统计 ›"
+                            font.pixelSize: 11
+                            color: "#1565C0"
+                            font.family: "Microsoft YaHei"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: openStats()
+                        }
                     }
 
                     // 手势设置
@@ -3577,9 +4001,9 @@ Rectangle {
                     font.family: "Microsoft YaHei"
                 }
                 Rectangle {
-                    width: 40; height: 24; radius: 4; color: "#DDDDDD"
-                    Text { anchors.centerIn: parent; text: "x"; font.pixelSize: 11; color: "#333"; font.family: "Microsoft YaHei" }
-                    MouseArea { anchors.fill: parent; onClicked: closePanels() }
+                    width: 40; height: 24; radius: 4; color: "#E3F2FD"; border.color: "#BBDEFB"
+                    Text { anchors.centerIn: parent; text: "导出"; font.pixelSize: 10; color: "#1565C0"; font.family: "Microsoft YaHei" }
+                    MouseArea { anchors.fill: parent; onClicked: exportBookmarks() }
                 }
                 }
             }
@@ -3599,7 +4023,8 @@ Rectangle {
 
                 delegate: Rectangle {
                     width: parent.width
-                    height: 36
+                    // 有备注时多留一行
+                    height: (modelData.note && modelData.note !== "") ? 50 : 36
                     radius: 4
                     color: bmMouse.pressed ? "#E0D8C8" : "#F5F0E8"
                     border.color: "#DDDDDD"
@@ -3627,7 +4052,7 @@ Rectangle {
                     Column {
                         anchors.left: parent.left
                         anchors.leftMargin: 8
-                        anchors.right: deleteButton.left
+                        anchors.right: noteButton.left
                         anchors.rightMargin: 6
                         anchors.verticalCenter: parent.verticalCenter
                         Text {
@@ -3643,6 +4068,39 @@ Rectangle {
                             color: "#888"
                             elide: Text.ElideRight
                             font.family: "Microsoft YaHei"
+                        }
+                        Text {
+                            width: parent.width
+                            visible: modelData.note && modelData.note !== ""
+                            text: "备注：" + (modelData.note || "")
+                            font.pixelSize: 9
+                            color: "#2E7D32"
+                            elide: Text.ElideRight
+                            font.family: "Microsoft YaHei"
+                        }
+                    }
+
+                    Rectangle {
+                        id: noteButton
+                        anchors.right: deleteButton.left
+                        anchors.rightMargin: 4
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 30
+                        height: 20
+                        radius: 3
+                        color: "#FFF3E0"
+                        border.color: "#FFCC80"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "备注"
+                            font.pixelSize: 9
+                            color: "#E65100"
+                            font.family: "Microsoft YaHei"
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: editBookmarkNote(modelData.id)
                         }
                     }
 
